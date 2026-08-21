@@ -3,6 +3,5 @@
 /tmp/
 /build/
 
-# forge-factory materialises these. A version is written in forge-factory.yaml.
-/go.mod
-/go.sum
+# forge-factory materialises the versions in go.mod. It is committed so the
+# module runs with a bare go run, and sync keeps it fresh.
