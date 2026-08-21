@@ -6,37 +6,37 @@ filename: "zz_generated.{{.InterfaceName}}.go"
 formatter: goimports
 
 packages:
-  github.com/alexandremahdhaoui/forge-ci/internal/adapter/gitadapter:
+  github.com/alexandremahdhaoui/forge-register/internal/adapter/storeadapter:
     config:
-      dir: internal/mocks/gitadaptermock
-      pkgname: gitadaptermock
+      dir: internal/mocks/storeadaptermock
+      pkgname: storeadaptermock
     interfaces:
-      Git:
+      Store:
 
-  github.com/alexandremahdhaoui/forge-ci/internal/adapter/execadapter:
-    config:
-      dir: internal/mocks/execadaptermock
-      pkgname: execadaptermock
-    interfaces:
-      Runner:
-
-  github.com/alexandremahdhaoui/forge-ci/internal/adapter/engineadapter:
+  github.com/alexandremahdhaoui/forge-register/internal/adapter/engineadapter:
     config:
       dir: internal/mocks/engineadaptermock
       pkgname: engineadaptermock
     interfaces:
       Caller:
 
-  github.com/alexandremahdhaoui/forge-ci/internal/adapter/fsadapter:
+  github.com/alexandremahdhaoui/forge-register/internal/adapter/registryadapter:
     config:
-      dir: internal/mocks/fsadaptermock
-      pkgname: fsadaptermock
+      dir: internal/mocks/registryadaptermock
+      pkgname: registryadaptermock
     interfaces:
-      FS:
+      Lister:
 
-  github.com/alexandremahdhaoui/forge-ci/internal/driver/clidriver:
+  github.com/alexandremahdhaoui/forge-register/internal/adapter/osvadapter:
     config:
-      dir: internal/mocks/clidrivermock
-      pkgname: clidrivermock
+      dir: internal/mocks/osvadaptermock
+      pkgname: osvadaptermock
     interfaces:
-      Reconciler:
+      Querier:
+
+  github.com/alexandremahdhaoui/forge-register/internal/controller/discoverycontroller:
+    config:
+      dir: internal/mocks/discoverycontrollermock
+      pkgname: discoverycontrollermock
+    interfaces:
+      Discoverer:

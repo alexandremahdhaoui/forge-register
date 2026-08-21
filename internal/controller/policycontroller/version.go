@@ -31,9 +31,9 @@ func parseVersion(s string) ([]int, string) {
 	return parts, pre
 }
 
-// compareVersions orders versions numerically part by part. Missing parts
+// CompareVersions orders versions numerically part by part. Missing parts
 // count as zero, and a pre-release sorts below its release.
-func compareVersions(a, b string) int {
+func CompareVersions(a, b string) int {
 	ap, apre := parseVersion(a)
 	bp, bpre := parseVersion(b)
 
@@ -70,9 +70,9 @@ func compareVersions(a, b string) int {
 	return 1
 }
 
-// inPrefix reports whether a version belongs to a track prefix: the prefix's
+// InPrefix reports whether a version belongs to a track prefix: the prefix's
 // numeric parts must equal the version's leading parts.
-func inPrefix(version, prefix string) bool {
+func InPrefix(version, prefix string) bool {
 	vp, _ := parseVersion(version)
 	pp, _ := parseVersion(prefix)
 
@@ -89,8 +89,8 @@ func inPrefix(version, prefix string) bool {
 	return true
 }
 
-// majorOf names the major-level track a version belongs to.
-func majorOf(version string) string {
+// MajorOf names the major-level track a version belongs to.
+func MajorOf(version string) string {
 	vp, _ := parseVersion(version)
 	if len(vp) == 0 {
 		return ""

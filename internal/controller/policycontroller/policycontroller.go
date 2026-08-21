@@ -30,7 +30,7 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 
 	newer := make([]regtypes.Candidate, 0, len(candidates))
 	for _, c := range candidates {
-		if inPrefix(c.Version, track.Prefix) && compareVersions(c.Version, track.Current) > 0 {
+		if InPrefix(c.Version, track.Prefix) && CompareVersions(c.Version, track.Current) > 0 {
 			newer = append(newer, c)
 		}
 	}
@@ -43,7 +43,7 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 	}
 
 	sort.Slice(newer, func(i, j int) bool {
-		return compareVersions(newer[i].Version, newer[j].Version) > 0
+		return CompareVersions(newer[i].Version, newer[j].Version) > 0
 	})
 
 	var quarantined, worse *regtypes.Candidate
@@ -174,7 +174,7 @@ func evaluateExact(verdict regtypes.Verdict, req regtypes.Request, available []r
 	var found *regtypes.Candidate
 
 	for i := range available {
-		if compareVersions(available[i].Version, req.Version) == 0 {
+		if CompareVersions(available[i].Version, req.Version) == 0 {
 			found = &available[i]
 			break
 		}
@@ -246,7 +246,7 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 	var lastInPrefix, successorFirst time.Time
 
 	for _, c := range in.Versions {
-		if inPrefix(c.Version, prefix) {
+		if InPrefix(c.Version, prefix) {
 			inLine = append(inLine, c)
 
 			if c.ReleasedAt.After(lastInPrefix) {
@@ -256,7 +256,7 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 			continue
 		}
 
-		if compareVersions(c.Version, prefix) > 0 {
+		if CompareVersions(c.Version, prefix) > 0 {
 			if successorFirst.IsZero() || c.ReleasedAt.Before(successorFirst) {
 				successorFirst = c.ReleasedAt
 			}
@@ -295,7 +295,7 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 	// point - so candidates order newest first here, with the floor and
 	// quarantine still enforced.
 	sort.Slice(inLine, func(i, j int) bool {
-		return compareVersions(inLine[i].Version, inLine[j].Version) > 0
+		return CompareVersions(inLine[i].Version, inLine[j].Version) > 0
 	})
 
 	current := firstAdmissible(inLine, now, p)
@@ -376,7 +376,7 @@ func poolFor(req regtypes.Request, available []regtypes.Candidate) []regtypes.Ca
 	prefix := req.Track
 	if prefix == "" {
 		for _, c := range available {
-			if m := majorOf(c.Version); prefix == "" || compareVersions(m, prefix) > 0 {
+			if m := MajorOf(c.Version); prefix == "" || CompareVersions(m, prefix) > 0 {
 				prefix = m
 			}
 		}
@@ -384,7 +384,7 @@ func poolFor(req regtypes.Request, available []regtypes.Candidate) []regtypes.Ca
 
 	pool := make([]regtypes.Candidate, 0, len(available))
 	for _, c := range available {
-		if inPrefix(c.Version, prefix) {
+		if InPrefix(c.Version, prefix) {
 			pool = append(pool, c)
 		}
 	}
@@ -397,7 +397,7 @@ func trackFor(req regtypes.Request, c regtypes.Candidate) string {
 		return req.Track
 	}
 
-	return majorOf(c.Version)
+	return MajorOf(c.Version)
 }
 
 // sortForAdmission orders by severity vector ascending, then release date
@@ -435,7 +435,7 @@ func firstAdmissible(pool []regtypes.Candidate, now time.Time, p regtypes.Params
 func newest(pool []regtypes.Candidate) regtypes.Candidate {
 	best := pool[0]
 	for _, c := range pool[1:] {
-		if compareVersions(c.Version, best.Version) > 0 {
+		if CompareVersions(c.Version, best.Version) > 0 {
 			best = c
 		}
 	}
@@ -469,17 +469,17 @@ func passingAlternatives(available []regtypes.Candidate, rejected regtypes.Candi
 			continue
 		}
 
-		if pass == nil || compareVersions(c.Version, pass.Version) > 0 {
+		if pass == nil || CompareVersions(c.Version, pass.Version) > 0 {
 			pass = &available[i]
 		}
 	}
 
-	if pass != nil && compareVersions(pass.Version, rejected.Version) != 0 {
+	if pass != nil && CompareVersions(pass.Version, rejected.Version) != 0 {
 		out = append(out, alternativesOf(*pass)...)
 	}
 
-	if latest := newest(available); compareVersions(latest.Version, rejected.Version) != 0 &&
-		(pass == nil || compareVersions(latest.Version, pass.Version) != 0) {
+	if latest := newest(available); CompareVersions(latest.Version, rejected.Version) != 0 &&
+		(pass == nil || CompareVersions(latest.Version, pass.Version) != 0) {
 		out = append(out, alternativesOf(latest)...)
 	}
 
