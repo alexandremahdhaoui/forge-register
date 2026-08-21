@@ -58,4 +58,4 @@ forge test-all
 ```
 
 Stages are lint, no-hardcoding, standalone, engine-docs, unwired,
-architecture, docs, unit, integration, conformance, e2e and coverage (95).
+architecture, docs, unit, conformance, e2e and coverage (90).

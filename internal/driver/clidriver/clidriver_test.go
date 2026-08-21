@@ -210,3 +210,59 @@ func TestNoVerbIsUsage(t *testing.T) {
 	h := newHarness(t)
 	require.ErrorIs(t, h.driver.Run(context.Background(), nil), clidriver.ErrUsage)
 }
+
+func TestArgumentShapesAreUsageErrors(t *testing.T) {
+	h := newHarness(t)
+
+	for _, args := range [][]string{
+		{"add"},
+		{"add", "--reason", "r", "no-colon"},
+		{"publish"},
+		{"publish", "--provenance", "rev", "no-colon", "v1"},
+	} {
+		err := h.driver.Run(context.Background(), args)
+		require.ErrorIs(t, err, clidriver.ErrUsage, "%v", args)
+	}
+}
+
+func TestAddReportsAStoreThatCannotTakeTheRequest(t *testing.T) {
+	h := newHarness(t)
+	h.store.EXPECT().PutRequest(mock.Anything, mock.Anything, mock.Anything).
+		Return(os.ErrPermission).Once()
+
+	err := h.driver.Run(context.Background(),
+		[]string{"add", "--reason", "r", "rust:example-crate"})
+	require.ErrorIs(t, err, os.ErrPermission)
+}
+
+func TestStatusRendersAdvisoriesAndDeprecations(t *testing.T) {
+	h := newHarness(t)
+	since := now.AddDate(0, 0, -3)
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{{
+		Package: "p", Ecosystem: "go", Prefix: "1", Current: "1.0.0",
+		Advisory:   &regtypes.Advisory{Severity: "critical", Since: since, VulnIDs: []string{"CVE-1"}},
+		Deprecated: &regtypes.Deprecation{Reason: "stale", Since: since},
+	}}, nil).Once()
+	h.store.EXPECT().PendingRequests(mock.Anything).
+		Return(map[string]regtypes.Request{"go/p/1-admission": {Type: regtypes.RequestAdmission}}, nil).Once()
+
+	require.NoError(t, h.driver.Run(context.Background(), []string{"status"}))
+	require.Contains(t, h.out.String(), "ADVISORY critical")
+	require.Contains(t, h.out.String(), "DEPRECATED (stale)")
+	require.Contains(t, h.out.String(), "pending go/p/1-admission")
+}
+
+func TestStatusReportsAStoreFailure(t *testing.T) {
+	h := newHarness(t)
+	h.store.EXPECT().Tracks(mock.Anything).Return(nil, os.ErrPermission).Once()
+
+	err := h.driver.Run(context.Background(), []string{"status"})
+	require.ErrorIs(t, err, os.ErrPermission)
+
+	h2 := newHarness(t)
+	h2.store.EXPECT().Tracks(mock.Anything).Return(nil, nil).Once()
+	h2.store.EXPECT().PendingRequests(mock.Anything).Return(nil, os.ErrPermission).Once()
+
+	err = h2.driver.Run(context.Background(), []string{"status"})
+	require.ErrorIs(t, err, os.ErrPermission)
+}

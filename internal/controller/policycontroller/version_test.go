@@ -178,3 +178,29 @@ func TestIsPrereleaseIsExported(t *testing.T) {
 	require.True(t, policycontroller.IsPrerelease("1.0.dev5"))
 	require.False(t, policycontroller.IsPrerelease("1.0.0"))
 }
+
+func TestPrereleaseIdentifierOrdering(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"1.0.0-alpha.9", "1.0.0-alpha.13", -1},  // numeric ids compare numerically
+		{"1.0.0-alpha.13", "1.0.0-alpha.9", 1},   // and both ways round
+		{"1.0.0-1", "1.0.0-alpha", -1},           // numeric sorts before alphabetic
+		{"1.0.0-alpha", "1.0.0-1", 1},            //
+		{"1.0.0-alpha", "1.0.0-beta", -1},        // alphabetic ids sort lexically
+		{"1.0.0-alpha", "1.0.0-alpha", 0},        // equal is equal
+		{"1.0.0-alpha", "1.0.0-alpha.1", -1},     // a shorter tag sorts first
+		{"1.0.0-alpha.1", "1.0.0-alpha", 1},      //
+		{"1.0.0-alpha.2", "1.0.0-alpha.2.x", -1}, // shared prefix, longer wins
+	}
+	for _, c := range cases {
+		require.Equal(t, c.want, policycontroller.CompareVersions(c.a, c.b),
+			"%s vs %s", c.a, c.b)
+	}
+}
+
+func TestMajorOfEdges(t *testing.T) {
+	require.Equal(t, "2", policycontroller.MajorOf("v2.1.0"))
+	require.Equal(t, "", policycontroller.MajorOf("nonsense"))
+}
