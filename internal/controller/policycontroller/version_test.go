@@ -173,3 +173,8 @@ func TestVersionParsingHandlesMixedTails(t *testing.T) {
 	require.False(t, policycontroller.InPrefix("1.2rc1", "1.3"))
 	require.Positive(t, policycontroller.CompareVersions("1.2rc1", "1.1"))
 }
+
+func TestIsPrereleaseIsExported(t *testing.T) {
+	require.True(t, policycontroller.IsPrerelease("1.0.dev5"))
+	require.False(t, policycontroller.IsPrerelease("1.0.0"))
+}

@@ -159,6 +159,12 @@ func isPrerelease(version string) bool {
 	return pre != ""
 }
 
+// IsPrerelease is isPrerelease for callers outside the package: the register
+// catalogs releases, and a successor line must hold at least one.
+func IsPrerelease(version string) bool {
+	return isPrerelease(version)
+}
+
 // MajorOf names the major-level track a version belongs to.
 func MajorOf(version string) string {
 	vp, _ := parseVersion(version)

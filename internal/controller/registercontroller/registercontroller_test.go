@@ -366,3 +366,50 @@ func TestAFeedFailureHidesNoOtherTrack(t *testing.T) {
 	require.Contains(t, report.Failed[0], "go:gone")
 	require.Len(t, report.Verdicts, 1, "the broken feed hides nothing, and internal tracks advance by proof")
 }
+
+func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
+	h := newHarness(t)
+
+	// Upstream's only life above 0.x is pre-releases and the 0.x line has
+	// not released in over staleAfterDays: nothing exists to move to, so
+	// the track must not deprecate as stale.
+	track := regtypes.Track{
+		Package: "httpx", Ecosystem: "python", Prefix: "0", Current: "0.28.1",
+		History: []regtypes.Entry{{Version: "0.28.1"}},
+	}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "python", "httpx").
+		Return([]regtypes.Candidate{
+			{Version: "0.28.1", ReleasedAt: days(300)},
+			{Version: "1.0.dev5", ReleasedAt: days(10)},
+		}, "sha256:snap", nil).Once()
+
+	var written regtypes.Track
+
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	_, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+	require.Nil(t, written.Deprecated)
+
+	// The moment 1.0 is a release, the stale rule may bite.
+	h2 := newHarness(t)
+	h2.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h2.discovery.EXPECT().Discover(mock.Anything, "python", "httpx").
+		Return([]regtypes.Candidate{
+			{Version: "0.28.1", ReleasedAt: days(300)},
+			{Version: "1.0.0", ReleasedAt: days(10)},
+		}, "sha256:snap", nil).Once()
+
+	h2.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+	h2.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	_, err = h2.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+	require.NotNil(t, written.Deprecated)
+	require.Equal(t, regtypes.DeprecationStale, written.Deprecated.Reason)
+}

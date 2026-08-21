@@ -319,7 +319,10 @@ func (c *Controller) maintain(track regtypes.Track, candidates []regtypes.Candid
 			if cand.ReleasedAt.After(lastRelease) {
 				lastRelease = cand.ReleasedAt
 			}
-		} else if compareNumeric(cand.Version, track.Prefix) > 0 {
+		} else if compareNumeric(cand.Version, track.Prefix) > 0 &&
+			!policycontroller.IsPrerelease(cand.Version) {
+			// A line holding only pre-releases is not a successor anyone
+			// can move to, so it cannot make this track stale.
 			hasSuccessor = true
 		}
 	}
