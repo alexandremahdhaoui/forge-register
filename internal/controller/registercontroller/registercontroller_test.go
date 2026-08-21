@@ -2,6 +2,7 @@ package registercontroller_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -337,4 +338,27 @@ func TestAnAdmissionBehindTheTrackMovesNothing(t *testing.T) {
 	// No PutTrack expectation: the track is already ahead of the adoption.
 	_, err := h.c.Process(context.Background(), now)
 	require.NoError(t, err)
+}
+
+func TestAFeedFailureHidesNoOtherTrack(t *testing.T) {
+	h := newHarness(t)
+
+	broken := regtypes.Track{Package: "gone", Ecosystem: "go", Prefix: "1", Current: "1.0.0"}
+	fine := regtypes.Track{Package: "p", Ecosystem: "rust", Prefix: "1", Current: "1.0.0"}
+	internal := regtypes.Track{Package: "spec", Ecosystem: "internal", Prefix: "0", Current: "0.2.0"}
+
+	h.store.EXPECT().Tracks(mock.Anything).
+		Return([]regtypes.Track{broken, fine, internal}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "go", "gone").
+		Return(nil, "", errors.New("status 404")).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "rust", "p").
+		Return([]regtypes.Candidate{{Version: "1.0.0", ReleasedAt: days(90)}}, "s", nil).Once()
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Once()
+	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	report, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+	require.Len(t, report.Failed, 1)
+	require.Contains(t, report.Failed[0], "go:gone")
+	require.Len(t, report.Verdicts, 1, "the broken feed hides nothing, and internal tracks advance by proof")
 }

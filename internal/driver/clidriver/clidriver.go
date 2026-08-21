@@ -238,7 +238,12 @@ func (d *Driver) report(ctx context.Context, verb string, run func() (registerco
 		fmt.Fprintf(d.deps.Out, "%s %s: %s\n", kv.Verdict.Code, kv.Key, kv.Verdict.Message)
 	}
 
-	fmt.Fprintf(d.deps.Out, "%s: %d verdicts, %d adopted\n", verb, len(report.Verdicts), report.Adopted)
+	for _, failure := range report.Failed {
+		fmt.Fprintf(d.deps.Out, "feed-failure %s\n", failure)
+	}
+
+	fmt.Fprintf(d.deps.Out, "%s: %d verdicts, %d adopted, %d feed failures\n",
+		verb, len(report.Verdicts), report.Adopted, len(report.Failed))
 
 	return nil
 }

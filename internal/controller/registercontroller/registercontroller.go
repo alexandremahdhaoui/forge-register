@@ -33,10 +33,13 @@ type KeyedVerdict struct {
 	Verdict regtypes.Verdict
 }
 
-// Report says what one run decided.
+// Report says what one run decided. Failed names tracks whose feed could not
+// answer - a broken feed must not hide the other tracks, and must not look
+// like a policy decision either.
 type Report struct {
 	Verdicts []KeyedVerdict
 	Adopted  int
+	Failed   []string
 }
 
 // Evaluate walks every track: fresh discovery, the upgrade policy, advisory
@@ -51,9 +54,18 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 	}
 
 	for _, track := range tracks {
+		// Internal packages advance by proof, never by discovery: they have
+		// no feed and no registry, and their door is Publish.
+		if track.Ecosystem == "internal" {
+			continue
+		}
+
 		candidates, snapshot, err := c.discovery.Discover(ctx, track.Ecosystem, track.Package)
 		if err != nil {
-			return Report{}, fmt.Errorf("evaluating %s: %w", track.Package, err)
+			report.Failed = append(report.Failed,
+				fmt.Sprintf("%s:%s: %v", track.Ecosystem, track.Package, err))
+
+			continue
 		}
 
 		verdict := policycontroller.EvaluateUpgrade(track, candidates, now, c.params)
