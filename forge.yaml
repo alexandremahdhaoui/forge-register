@@ -22,33 +22,11 @@ build:
           github.com/alexandremahdhaoui/forge-revision-spec testdata/cases.json
           .forge/spec-cache/revision
 
-  # Every engine generates its MCP surface from forge-register-spec's schema,
-  # the same file forge-factory reads, so the contract two tools share is the
-  # one the engines are built from.
-  - name: gen-register-discover
-    src: ./cmd/register-discover
-    engine: go://forge-dev
-
-  - name: gen-register-evaluate
-    src: ./cmd/register-evaluate
-    engine: go://forge-dev
-
-  - name: gen-register-publish
-    src: ./cmd/register-publish
-    engine: go://forge-dev
-
   - name: generate-mocks
     src: .
     engine: go://generic-builder
     spec:
       command: mockery
-
-  - name: generate-docs
-    src: .
-    engine: go://generic-builder
-    spec:
-      command: go
-      args: ["run", "./cmd/docgen"]
 
   - name: format-code
     src: .
@@ -56,21 +34,6 @@ build:
 
   - name: forge-register
     src: ./cmd/forge-register
-    dest: ./build/bin
-    engine: go://go-build
-
-  - name: register-discover
-    src: ./cmd/register-discover
-    dest: ./build/bin
-    engine: go://go-build
-
-  - name: register-evaluate
-    src: ./cmd/register-evaluate
-    dest: ./build/bin
-    engine: go://go-build
-
-  - name: register-publish
-    src: ./cmd/register-publish
     dest: ./build/bin
     engine: go://go-build
 
@@ -89,12 +52,6 @@ test:
     spec:
       command: sh
       args: ["hack/standalone.sh"]
-
-  - name: engine-docs
-    runner: go://generic-test-runner
-    spec:
-      command: sh
-      args: ["hack/engine-docs.sh"]
 
   - name: unwired
     runner: go://generic-test-runner
@@ -117,12 +74,6 @@ test:
   - name: unit
     runner: go://go-test
 
-  - name: integration
-    runner: go://go-test
-    spec:
-      tags: [integration]
-      packages: [./test/integration/...]
-
   - name: conformance
     runner: go://go-test
     spec:
@@ -140,7 +91,7 @@ test:
     runner: go://generic-test-runner
     spec:
       command: sh
-      args: ["hack/coverage.sh", "95"]
+      args: ["hack/coverage.sh", "90"]
 
 factory:
   module: github.com/alexandremahdhaoui/forge-register

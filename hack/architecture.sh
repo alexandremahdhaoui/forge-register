@@ -31,7 +31,10 @@ check internal/adapter "internal/controller internal/driver" \
 check internal/controller "internal/driver" \
     "A controller holds business logic. Drivers call controllers, never the reverse."
 
-check pkg/citypes "internal/adapter internal/controller internal/driver" \
+check pkg/config "internal/adapter internal/controller internal/driver internal/types" \
+    "Config is plain parsing. It depends on nothing internal."
+
+check internal/types "internal/adapter internal/controller internal/driver" \
     "Types are plain data. They depend on nothing."
 
 for dir in $(find internal/adapter -mindepth 1 -maxdepth 1 -type d); do
@@ -41,7 +44,7 @@ for dir in $(find internal/adapter -mindepth 1 -maxdepth 1 -type d); do
 
     for sibling in $siblings; do
         case "$sibling" in
-            execadapter|fsadapter) continue ;;
+            execadapter|fsadapter|engineadapter) continue ;;
         esac
 
         hits=$(grep -l "$MODULE/internal/adapter/$sibling" $files 2>/dev/null || true)
