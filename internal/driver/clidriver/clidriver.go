@@ -128,12 +128,18 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 }
 
 func (d *Driver) describe(cfg config.Register) error {
-	fmt.Fprintf(d.deps.Out, "register %s\n", cfg.Name)
-	fmt.Fprintf(d.deps.Out, "  state %s\n", cfg.State.Engine)
-	fmt.Fprintf(d.deps.Out, "  quarantine %dd, floor %s, deprecate %dd, stale %dd, grace %dd, tracks<=%d\n",
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "register %s\n", cfg.Name)
+	fmt.Fprintf(&b, "  state %s\n", cfg.State.Engine)
+	fmt.Fprintf(&b, "  quarantine %dd, floor %s, deprecate %dd, stale %dd, grace %dd, tracks<=%d\n",
 		cfg.Params.QuarantineDays, cfg.Params.AdmissionMaxSeverity,
 		cfg.Params.DeprecateAfterDays, cfg.Params.StaleAfterDays,
 		cfg.Params.DeprecatedGraceDays, cfg.Params.MaxTracksPerPackage)
+
+	if _, err := io.WriteString(d.deps.Out, b.String()); err != nil {
+		return fmt.Errorf("writing the report: %w", err)
+	}
 
 	return nil
 }
@@ -158,7 +164,9 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 				t.Deprecated.Reason, t.Deprecated.Since.Format("2006-01-02"))
 		}
 
-		fmt.Fprintln(d.deps.Out, line)
+		if _, err := fmt.Fprintln(d.deps.Out, line); err != nil {
+			return fmt.Errorf("writing the report: %w", err)
+		}
 	}
 
 	pending, err := store.PendingRequests(ctx)
@@ -166,11 +174,17 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 		return err
 	}
 
+	var b strings.Builder
+
 	for key, r := range pending {
-		fmt.Fprintf(d.deps.Out, "pending %s: %s %s:%s %s\n", key, r.Type, r.Ecosystem, r.Package, r.Version)
+		fmt.Fprintf(&b, "pending %s: %s %s:%s %s\n", key, r.Type, r.Ecosystem, r.Package, r.Version)
 	}
 
-	fmt.Fprintf(d.deps.Out, "%d tracks, %d pending requests\n", len(tracks), len(pending))
+	fmt.Fprintf(&b, "%d tracks, %d pending requests\n", len(tracks), len(pending))
+
+	if _, err := io.WriteString(d.deps.Out, b.String()); err != nil {
+		return fmt.Errorf("writing the report: %w", err)
+	}
 
 	return nil
 }
@@ -199,7 +213,10 @@ func (d *Driver) add(ctx context.Context, store storeadapter.Store, args []strin
 		return err
 	}
 
-	fmt.Fprintf(d.deps.Out, "filed %s. the pipeline answers it on its next run.\n", key)
+	if _, err := fmt.Fprintf(d.deps.Out,
+		"filed %s. the pipeline answers it on its next run.\n", key); err != nil {
+		return fmt.Errorf("writing the report: %w", err)
+	}
 
 	return nil
 }
@@ -223,7 +240,10 @@ func (d *Driver) publish(ctx context.Context, controller *registercontroller.Con
 		return err
 	}
 
-	fmt.Fprintf(d.deps.Out, "%s %s: %s\n", kv.Verdict.Code, kv.Key, kv.Verdict.Message)
+	if _, err := fmt.Fprintf(d.deps.Out,
+		"%s %s: %s\n", kv.Verdict.Code, kv.Key, kv.Verdict.Message); err != nil {
+		return fmt.Errorf("writing the report: %w", err)
+	}
 
 	return nil
 }
@@ -234,16 +254,22 @@ func (d *Driver) report(ctx context.Context, verb string, run func() (registerco
 		return err
 	}
 
+	var b strings.Builder
+
 	for _, kv := range report.Verdicts {
-		fmt.Fprintf(d.deps.Out, "%s %s: %s\n", kv.Verdict.Code, kv.Key, kv.Verdict.Message)
+		fmt.Fprintf(&b, "%s %s: %s\n", kv.Verdict.Code, kv.Key, kv.Verdict.Message)
 	}
 
 	for _, failure := range report.Failed {
-		fmt.Fprintf(d.deps.Out, "feed-failure %s\n", failure)
+		fmt.Fprintf(&b, "feed-failure %s\n", failure)
 	}
 
-	fmt.Fprintf(d.deps.Out, "%s: %d verdicts, %d adopted, %d feed failures\n",
+	fmt.Fprintf(&b, "%s: %d verdicts, %d adopted, %d feed failures\n",
 		verb, len(report.Verdicts), report.Adopted, len(report.Failed))
+
+	if _, err := io.WriteString(d.deps.Out, b.String()); err != nil {
+		return fmt.Errorf("writing the report: %w", err)
+	}
 
 	return nil
 }

@@ -131,3 +131,45 @@ func TestPrereleaseTagsOrderTheSemverWay(t *testing.T) {
 	require.Equal(t, -1, policycontroller.CompareVersions("4.0.0-alpha.9", "4.0.0-alpha.13"))
 	require.Equal(t, 1, policycontroller.CompareVersions("4.0.0", "4.0.0-alpha.13"))
 }
+
+func TestPEP440PrereleasesAreNeverCandidates(t *testing.T) {
+	clean := regtypes.Vector{}
+
+	// Python spells pre-releases with no hyphen: 1.0.dev5, 1.0rc1. This
+	// exact shape once entered an index as a release.
+	tr := track("0", "0.28.1", clean)
+	v := policycontroller.EvaluateUpgrade(tr, []regtypes.Candidate{
+		candidate("1.0.dev5", 400, clean),
+		candidate("1.0rc1", 400, clean),
+	}, now, params())
+	require.Equal(t, regtypes.VerdictUpToDate, v.Code)
+
+	// Admission picks the release, not the newer .dev.
+	v = policycontroller.EvaluateAdmission(regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "p", Ecosystem: "python", Reason: "r",
+	}, []regtypes.Candidate{
+		candidate("0.28.1", 400, clean),
+		candidate("1.0.dev5", 30, clean),
+	}, now, params())
+	require.Equal(t, regtypes.VerdictAdopted, v.Code)
+	require.Equal(t, "0.28.1", v.Adopted)
+
+	// The numeric prefix of 1.0rc1 still places it in track 1, so an exact
+	// request lands where the release will.
+	require.True(t, policycontroller.InPrefix("1.0rc1", "1"))
+	require.Negative(t, policycontroller.CompareVersions("1.0rc1", "1.0"))
+	require.Negative(t, policycontroller.CompareVersions("1.0.dev5", "1.0rc1"),
+		"dev sorts below rc the pre-release way")
+}
+
+func TestVersionParsingHandlesMixedTails(t *testing.T) {
+	// A hyphen tail and a PEP 440 tail in one version: both land in the
+	// pre-release tag, ordered tail-first.
+	require.Negative(t, policycontroller.CompareVersions("1.0rc1-x", "1.0"))
+	require.Negative(t, policycontroller.CompareVersions("1.0rc1-a", "1.0rc1-b"))
+
+	// Leading digits of a mixed segment stay numeric: 1.2rc1 is in 1.2.
+	require.True(t, policycontroller.InPrefix("1.2rc1", "1.2"))
+	require.False(t, policycontroller.InPrefix("1.2rc1", "1.3"))
+	require.Positive(t, policycontroller.CompareVersions("1.2rc1", "1.1"))
+}

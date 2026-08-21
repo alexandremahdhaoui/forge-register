@@ -43,12 +43,24 @@ func TestCompareVectors(t *testing.T) {
 		want int
 	}{
 		{"equal", regtypes.Vector{}, regtypes.Vector{}, 0},
-		{"a-critical-never-trades-against-lows",
-			regtypes.Vector{Critical: 1}, regtypes.Vector{Low: 99}, 1},
-		{"fixing-a-high-wins-despite-a-new-low",
-			regtypes.Vector{Low: 1}, regtypes.Vector{High: 1}, -1},
-		{"counts-compare-within-a-class",
-			regtypes.Vector{Medium: 2}, regtypes.Vector{Medium: 3}, -1},
+		{
+			"a-critical-never-trades-against-lows",
+			regtypes.Vector{Critical: 1},
+			regtypes.Vector{Low: 99},
+			1,
+		},
+		{
+			"fixing-a-high-wins-despite-a-new-low",
+			regtypes.Vector{Low: 1},
+			regtypes.Vector{High: 1},
+			-1,
+		},
+		{
+			"counts-compare-within-a-class",
+			regtypes.Vector{Medium: 2},
+			regtypes.Vector{Medium: 3},
+			-1,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, tc.a.Compare(tc.b))

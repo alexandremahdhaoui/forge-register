@@ -147,7 +147,7 @@ func (h *HTTP) severityOf(ctx context.Context, id string) (regtypes.Severity, er
 	if err != nil {
 		return "", fmt.Errorf("reading vulnerability %s: %w", id, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("reading vulnerability %s: status %d", id, res.StatusCode)
@@ -193,7 +193,7 @@ func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
 	if err != nil {
 		return fmt.Errorf("posting %s: %w", u, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("posting %s: status %d", u, res.StatusCode)

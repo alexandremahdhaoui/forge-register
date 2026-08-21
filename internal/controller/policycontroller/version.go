@@ -6,7 +6,10 @@ import (
 )
 
 // parseVersion splits a version into numeric parts and a pre-release tail. A
-// leading v is tolerated because ecosystems disagree about it.
+// leading v is tolerated because ecosystems disagree about it. PEP 440 spells
+// pre-releases with no hyphen (1.0.dev5, 1.0rc1), so any non-numeric segment
+// is a pre-release tail too - this is what once let a .dev version into an
+// index as a release.
 func parseVersion(s string) ([]int, string) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
 
@@ -19,13 +22,30 @@ func parseVersion(s string) ([]int, string) {
 	raw := strings.Split(s, ".")
 	parts := make([]int, 0, len(raw))
 
-	for _, r := range raw {
+	for i, r := range raw {
 		n, err := strconv.Atoi(r)
-		if err != nil {
-			break
+		if err == nil {
+			parts = append(parts, n)
+
+			continue
 		}
 
-		parts = append(parts, n)
+		// Leading digits stay a numeric part (1.0rc1 is in track 1.0);
+		// everything from the first non-digit joins the pre-release tail.
+		digits := len(r) - len(strings.TrimLeft(r, "0123456789"))
+		if digits > 0 {
+			n, _ := strconv.Atoi(r[:digits])
+			parts = append(parts, n)
+		}
+
+		tail := strings.Join(append([]string{r[digits:]}, raw[i+1:]...), ".")
+		if pre == "" {
+			pre = tail
+		} else {
+			pre = tail + "." + pre
+		}
+
+		break
 	}
 
 	return parts, pre

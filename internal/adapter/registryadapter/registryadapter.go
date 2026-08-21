@@ -194,7 +194,7 @@ func (h *HTTP) get(ctx context.Context, u string, raw *[]byte) error {
 	if err != nil {
 		return fmt.Errorf("fetching %s: %w", u, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("fetching %s: status %d", u, res.StatusCode)

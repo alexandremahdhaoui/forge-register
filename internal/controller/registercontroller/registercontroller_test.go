@@ -113,8 +113,10 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
 	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
 		Return([]regtypes.Candidate{
-			{Version: "1.1.0", ReleasedAt: days(90),
-				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"CVE-9"}},
+			{
+				Version: "1.1.0", ReleasedAt: days(90),
+				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"CVE-9"},
+			},
 		}, "sha256:snap", nil).Once()
 
 	var written regtypes.Track
@@ -133,8 +135,10 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{written}, nil).Once()
 	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
 		Return([]regtypes.Candidate{
-			{Version: "1.1.0", ReleasedAt: days(90),
-				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"CVE-9"}},
+			{
+				Version: "1.1.0", ReleasedAt: days(90),
+				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"CVE-9"},
+			},
 			{Version: "1.1.1", ReleasedAt: days(0)},
 		}, "sha256:snap2", nil).Once()
 
