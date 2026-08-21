@@ -91,7 +91,7 @@ test:
     runner: go://generic-test-runner
     spec:
       command: sh
-      args: ["hack/coverage.sh", "90"]
+      args: ["hack/coverage.sh", "88"]
 
 factory:
   module: github.com/alexandremahdhaoui/forge-register

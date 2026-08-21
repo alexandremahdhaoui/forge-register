@@ -1,7 +1,9 @@
 package engineadapter_test
 
 import (
+	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -97,4 +99,13 @@ func TestANilLookPathIsSkipped(t *testing.T) {
 	cmd, err := r.Resolve("go://github.com/x/y/cmd/z@v1")
 	require.NoError(t, err)
 	require.Equal(t, "go", cmd.Path)
+}
+
+func TestACallToAnUnresolvableEngineFails(t *testing.T) {
+	caller := engineadapter.NewMCPCaller("", "test", io.Discard)
+
+	var out map[string]any
+
+	err := caller.Call(context.Background(), "alias://nope", "get", map[string]any{}, &out)
+	require.Error(t, err)
 }

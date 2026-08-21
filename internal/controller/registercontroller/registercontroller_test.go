@@ -280,3 +280,61 @@ func TestPublishOfAnOlderVersionMovesNothing(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, regtypes.VerdictUpToDate, kv.Verdict.Code)
 }
+
+func TestAnAdvisoryNamesItsHighestSeverity(t *testing.T) {
+	for _, tc := range []struct {
+		vector regtypes.Vector
+		want   regtypes.Severity
+	}{
+		{regtypes.Vector{Critical: 1, Low: 3}, regtypes.SeverityCritical},
+		{regtypes.Vector{Medium: 2}, regtypes.SeverityMedium},
+		{regtypes.Vector{Low: 1}, regtypes.SeverityLow},
+	} {
+		h := newHarness(t)
+		track := regtypes.Track{Package: "p", Ecosystem: "go", Prefix: "1", Current: "1.0.0"}
+
+		h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+		h.discovery.EXPECT().Discover(mock.Anything, "go", "p").
+			Return([]regtypes.Candidate{
+				{Version: "1.0.0", ReleasedAt: days(90), Vulns: tc.vector, VulnIDs: []string{"V"}},
+			}, "s", nil).Once()
+
+		var written regtypes.Track
+
+		h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+			Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+		h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+		_, err := h.c.Evaluate(context.Background(), now)
+		require.NoError(t, err)
+		require.NotNil(t, written.Advisory)
+		require.Equal(t, tc.want, written.Advisory.Severity)
+	}
+}
+
+func TestAnAdmissionBehindTheTrackMovesNothing(t *testing.T) {
+	h := newHarness(t)
+
+	request := regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "example-crate", Ecosystem: "rust",
+		Version: "1.0.0", Reason: "needed", CreatedAt: now,
+	}
+	key := registercontroller.RequestKey(request, now)
+
+	h.store.EXPECT().PendingRequests(mock.Anything).
+		Return(map[string]regtypes.Request{key: request}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "rust", "example-crate").
+		Return([]regtypes.Candidate{
+			{Version: "1.0.0", ReleasedAt: days(90)},
+			{Version: "1.2.0", ReleasedAt: days(60)},
+		}, "s", nil).Once()
+	h.store.EXPECT().Track(mock.Anything, "rust", "example-crate", "1").
+		Return(regtypes.Track{
+			Package: "example-crate", Ecosystem: "rust", Prefix: "1", Current: "1.2.0",
+		}, true, nil).Once()
+	h.store.EXPECT().PutVerdict(mock.Anything, key, mock.Anything).Return(nil).Once()
+
+	// No PutTrack expectation: the track is already ahead of the adoption.
+	_, err := h.c.Process(context.Background(), now)
+	require.NoError(t, err)
+}

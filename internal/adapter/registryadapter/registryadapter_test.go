@@ -94,3 +94,8 @@ func TestAMissingPackageIsAnErrorNotASilence(t *testing.T) {
 	_, err := registryadapter.New(nil, fakeRegistries(t)).Versions(context.Background(), "rust", "absent")
 	require.ErrorContains(t, err, "status 404")
 }
+
+func TestAZeroBaseURLsFallsBackToThePublicRegistries(t *testing.T) {
+	// Construction applies the defaults; no request is made here.
+	require.NotNil(t, registryadapter.New(nil, registryadapter.BaseURLs{}))
+}

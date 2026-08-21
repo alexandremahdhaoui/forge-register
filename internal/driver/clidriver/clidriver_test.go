@@ -3,6 +3,7 @@ package clidriver_test
 import (
 	"bytes"
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -180,4 +181,32 @@ func TestAnUnknownVerbIsUsage(t *testing.T) {
 	err := h.driver.Run(context.Background(), []string{"frobnicate"})
 	require.ErrorIs(t, err, clidriver.ErrUsage)
 	require.NotEmpty(t, clidriver.Usage())
+}
+
+func TestAnUnreadableConfigIsAnError(t *testing.T) {
+	driver := clidriver.New(clidriver.Deps{
+		Out:      &bytes.Buffer{},
+		ReadFile: func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		Now:      func() time.Time { return now },
+		Build: func(config.Register) (*registercontroller.Controller, storeadapter.Store, error) {
+			return nil, nil, nil
+		},
+	})
+
+	err := driver.Run(context.Background(), []string{"validate"})
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestEvaluateAndProcessRunAlone(t *testing.T) {
+	h := newHarness(t)
+	h.store.EXPECT().Tracks(mock.Anything).Return(nil, nil).Once()
+	require.NoError(t, h.driver.Run(context.Background(), []string{"evaluate"}))
+
+	h.store.EXPECT().PendingRequests(mock.Anything).Return(nil, nil).Once()
+	require.NoError(t, h.driver.Run(context.Background(), []string{"process"}))
+}
+
+func TestNoVerbIsUsage(t *testing.T) {
+	h := newHarness(t)
+	require.ErrorIs(t, h.driver.Run(context.Background(), nil), clidriver.ErrUsage)
 }

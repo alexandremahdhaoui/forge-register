@@ -447,3 +447,18 @@ func TestEvaluateDeprecation(t *testing.T) {
 		})
 	}
 }
+
+func TestAFreshDisclosureOnCurrentOverridesTheHistory(t *testing.T) {
+	// The history recorded a clean adoption; the fresh snapshot says current
+	// now carries a critical, and a clean release exists: security upgrade.
+	tr := track("1", "1.1.0", regtypes.Vector{})
+
+	v := policycontroller.EvaluateUpgrade(tr, []regtypes.Candidate{
+		candidate("1.1.0", 60, regtypes.Vector{Critical: 1}),
+		candidate("1.2.1", 0, regtypes.Vector{}),
+	}, now, params())
+
+	require.Equal(t, regtypes.VerdictAdopted, v.Code)
+	require.Equal(t, "1.2.1", v.Adopted)
+	require.Contains(t, v.Message, "security upgrade")
+}

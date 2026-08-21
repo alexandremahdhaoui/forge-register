@@ -83,3 +83,47 @@ func TestAShortBatchAnswerIsAnError(t *testing.T) {
 		[]string{"v1.0.0"})
 	require.ErrorContains(t, err, "1 versions")
 }
+
+func TestEverySeverityClassMaps(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[{"vulns":[
+			{"id":"C"},{"id":"H"},{"id":"M"},{"id":"L"}
+		]}]}`))
+	})
+
+	for id, severity := range map[string]string{
+		"C": "CRITICAL", "H": "HIGH", "M": "MODERATE", "L": "LOW",
+	} {
+		id, severity := id, severity
+		mux.HandleFunc("/v1/vulns/"+id, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"database_specific":{"severity":"` + severity + `"}}`))
+		})
+	}
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	byVersion, _, err := osvadapter.New(nil, server.URL).Vulns(context.Background(),
+		"rust", "x", []string{"1.0.0"})
+	require.NoError(t, err)
+	require.Equal(t, regtypes.Vector{Critical: 1, High: 1, Medium: 1, Low: 1},
+		regtypes.VectorOf(byVersion["1.0.0"]))
+}
+
+func TestAFailingFeedIsAnError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[{"vulns":[{"id":"X"}]}]}`))
+	})
+	mux.HandleFunc("/v1/vulns/X", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	_, _, err := osvadapter.New(nil, server.URL).Vulns(context.Background(),
+		"rust", "x", []string{"1.0.0"})
+	require.ErrorContains(t, err, "status 500")
+}

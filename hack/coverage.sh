@@ -8,7 +8,7 @@ mkdir -p "$(dirname "$OUT")"
 
 PKGS=$(go list ./internal/... ./pkg/... | grep -v '/internal/mocks/' | paste -sd, -)
 
-go test -tags "integration e2e" -coverpkg="$PKGS" -coverprofile="$OUT.raw" ./... >/dev/null
+go test -tags "conformance e2e" -coverpkg="$PKGS" -coverprofile="$OUT.raw" ./... >/dev/null
 
 grep -v '/internal/mocks/' "$OUT.raw" > "$OUT"
 

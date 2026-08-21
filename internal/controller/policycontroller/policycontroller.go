@@ -26,7 +26,18 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 		DecidedAt: now,
 	}
 
+	// The history records what current's vulnerabilities were at adoption;
+	// the fresh snapshot says what they are now. A disclosure on the current
+	// version must move this comparison, so fresh wins when present.
 	current := currentVector(track)
+
+	for _, c := range candidates {
+		if c.Version == track.Current {
+			current = c.Vulns
+
+			break
+		}
+	}
 
 	newer := make([]regtypes.Candidate, 0, len(candidates))
 	for _, c := range candidates {
