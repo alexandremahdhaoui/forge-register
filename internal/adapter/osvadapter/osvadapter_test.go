@@ -1,0 +1,85 @@
+package osvadapter_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/alexandremahdhaoui/forge-register/internal/adapter/osvadapter"
+	"github.com/alexandremahdhaoui/forge-register/internal/types/regtypes"
+)
+
+func fakeOSV(t *testing.T) string {
+	t.Helper()
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[
+			{"vulns":[{"id":"CVE-1"},{"id":"CVE-2"}]},
+			{}
+		]}`))
+	})
+	mux.HandleFunc("/v1/vulns/CVE-1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"database_specific":{"severity":"HIGH"}}`))
+	})
+	mux.HandleFunc("/v1/vulns/CVE-2", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"severity":[{"type":"CVSS_V3","score":"..."}]}`))
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	return server.URL
+}
+
+func TestVulnsClassifyBySeverityAndDigestTheSnapshot(t *testing.T) {
+	q := osvadapter.New(nil, fakeOSV(t))
+
+	byVersion, digest, err := q.Vulns(context.Background(), "rust", "example-crate",
+		[]string{"1.0.0", "1.0.1"})
+	require.NoError(t, err)
+
+	require.Len(t, byVersion["1.0.0"], 2)
+	require.Empty(t, byVersion["1.0.1"])
+
+	vector := regtypes.VectorOf(byVersion["1.0.0"])
+	// CVE-1 is HIGH; CVE-2's severity could not be classified, which counts
+	// as high, the safe default.
+	require.Equal(t, regtypes.Vector{High: 2}, vector)
+
+	require.Contains(t, digest, "sha256:")
+
+	// The digest is stable across calls: the snapshot is canonicalised.
+	_, again, err := q.Vulns(context.Background(), "rust", "example-crate",
+		[]string{"1.0.0", "1.0.1"})
+	require.NoError(t, err)
+	require.Equal(t, digest, again)
+}
+
+func TestAnEcosystemWithoutAFeedAnswersEmpty(t *testing.T) {
+	q := osvadapter.New(nil, fakeOSV(t))
+
+	byVersion, digest, err := q.Vulns(context.Background(), "internal", "golden-spec",
+		[]string{"0.3.0"})
+	require.NoError(t, err)
+	require.Empty(t, byVersion)
+	require.NotEmpty(t, digest)
+}
+
+func TestAShortBatchAnswerIsAnError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	_, _, err := osvadapter.New(nil, server.URL).Vulns(context.Background(), "go", "example.com/pkg",
+		[]string{"v1.0.0"})
+	require.ErrorContains(t, err, "1 versions")
+}
