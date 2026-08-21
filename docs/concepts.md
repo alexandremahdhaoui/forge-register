@@ -26,6 +26,9 @@ compared lexicographically from critical down. A critical never trades
 against any number of lows; a version that fixes a high while adding a low
 still wins. Unknown severity counts as high.
 
+A register catalogs releases: a pre-release is never a candidate for
+admission or upgrade, and only an exact request naming one admits it.
+
 ## Verdict codes
 
 | Code | Means |

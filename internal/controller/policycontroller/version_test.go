@@ -84,3 +84,50 @@ func TestAnAdoptionVerdictCarriesTheDecisionTime(t *testing.T) {
 	require.Equal(t, now, v.DecidedAt)
 	require.False(t, v.DecidedAt.Equal(time.Time{}))
 }
+
+func TestPrereleasesAreNeverCandidates(t *testing.T) {
+	clean := regtypes.Vector{}
+
+	// Upgrade: a newer pre-release does not advance the track.
+	tr := track("7", "7.0.0", clean)
+	v := policycontroller.EvaluateUpgrade(tr, []regtypes.Candidate{
+		candidate("7.1.0-dev.20260821", 30, clean),
+	}, now, params())
+	require.Equal(t, regtypes.VerdictUpToDate, v.Code)
+
+	// Admission with no version: the pool holds releases only, and the
+	// default track comes from released majors.
+	v = policycontroller.EvaluateAdmission(regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "p", Ecosystem: "typescript", Reason: "r",
+	}, []regtypes.Candidate{
+		candidate("5.9.2", 90, clean),
+		candidate("6.0.0-beta.1", 30, clean),
+	}, now, params())
+	require.Equal(t, regtypes.VerdictAdopted, v.Code)
+	require.Equal(t, "5.9.2", v.Adopted)
+
+	// An exact request may still name a pre-release: nothing is substituted.
+	v = policycontroller.EvaluateAdmission(regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "p", Ecosystem: "typescript",
+		Version: "6.0.0-beta.1", Reason: "r",
+	}, []regtypes.Candidate{
+		candidate("6.0.0-beta.1", 30, clean),
+	}, now, params())
+	require.Equal(t, regtypes.VerdictAdopted, v.Code)
+}
+
+func TestPrereleaseTagsOrderTheSemverWay(t *testing.T) {
+	clean := regtypes.Vector{}
+
+	// alpha.13 is newer than alpha.9: numeric identifiers compare
+	// numerically, not lexically.
+	tr := track("4", "4.0.0-alpha.9", clean)
+	v := policycontroller.EvaluateUpgrade(tr, []regtypes.Candidate{
+		candidate("4.0.0-alpha.13", 30, clean),
+	}, now, params())
+	// Pre-releases are not candidates at all - but the ordering itself must
+	// hold for exact requests, pinned here through the comparison.
+	require.Equal(t, regtypes.VerdictUpToDate, v.Code)
+	require.Equal(t, -1, policycontroller.CompareVersions("4.0.0-alpha.9", "4.0.0-alpha.13"))
+	require.Equal(t, 1, policycontroller.CompareVersions("4.0.0", "4.0.0-alpha.13"))
+}

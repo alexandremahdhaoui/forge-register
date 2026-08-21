@@ -41,6 +41,10 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 
 	newer := make([]regtypes.Candidate, 0, len(candidates))
 	for _, c := range candidates {
+		if isPrerelease(c.Version) {
+			continue
+		}
+
 		if InPrefix(c.Version, track.Prefix) && CompareVersions(c.Version, track.Current) > 0 {
 			newer = append(newer, c)
 		}
@@ -257,6 +261,10 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 	var lastInPrefix, successorFirst time.Time
 
 	for _, c := range in.Versions {
+		if isPrerelease(c.Version) {
+			continue
+		}
+
 		if InPrefix(c.Version, prefix) {
 			inLine = append(inLine, c)
 
@@ -381,20 +389,28 @@ func age(c regtypes.Candidate, now time.Time) time.Duration {
 	return now.Sub(c.ReleasedAt)
 }
 
-// poolFor narrows candidates to the requested track, or to the highest major
-// when the request names none: the default track.
+// poolFor narrows candidates to releases in the requested track, or in the
+// highest released major when the request names none: the default track.
+// Pre-releases never enter a pool; a request must name one exactly.
 func poolFor(req regtypes.Request, available []regtypes.Candidate) []regtypes.Candidate {
+	releases := make([]regtypes.Candidate, 0, len(available))
+	for _, c := range available {
+		if !isPrerelease(c.Version) {
+			releases = append(releases, c)
+		}
+	}
+
 	prefix := req.Track
 	if prefix == "" {
-		for _, c := range available {
+		for _, c := range releases {
 			if m := MajorOf(c.Version); prefix == "" || CompareVersions(m, prefix) > 0 {
 				prefix = m
 			}
 		}
 	}
 
-	pool := make([]regtypes.Candidate, 0, len(available))
-	for _, c := range available {
+	pool := make([]regtypes.Candidate, 0, len(releases))
+	for _, c := range releases {
 		if InPrefix(c.Version, prefix) {
 			pool = append(pool, c)
 		}

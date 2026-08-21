@@ -63,7 +63,48 @@ func CompareVersions(a, b string) int {
 		return 1
 	case bpre == "":
 		return -1
-	case apre < bpre:
+	}
+
+	return comparePrerelease(apre, bpre)
+}
+
+// comparePrerelease orders pre-release tags the semver way: dot-separated
+// identifiers, numeric ones numerically, and a shorter tag sorts first.
+func comparePrerelease(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		an, aerr := strconv.Atoi(as[i])
+		bn, berr := strconv.Atoi(bs[i])
+
+		switch {
+		case aerr == nil && berr == nil:
+			if an != bn {
+				if an < bn {
+					return -1
+				}
+
+				return 1
+			}
+		case aerr == nil:
+			return -1
+		case berr == nil:
+			return 1
+		default:
+			if as[i] != bs[i] {
+				if as[i] < bs[i] {
+					return -1
+				}
+
+				return 1
+			}
+		}
+	}
+
+	switch {
+	case len(as) == len(bs):
+		return 0
+	case len(as) < len(bs):
 		return -1
 	}
 
@@ -87,6 +128,15 @@ func InPrefix(version, prefix string) bool {
 	}
 
 	return true
+}
+
+// isPrerelease reports whether a version carries a pre-release tag. A
+// register catalogs releases: pre-releases are never candidates unless a
+// request names one exactly.
+func isPrerelease(version string) bool {
+	_, pre := parseVersion(version)
+
+	return pre != ""
 }
 
 // MajorOf names the major-level track a version belongs to.
