@@ -5,7 +5,7 @@ artifactStorePath: .forge/artifact-store.yaml
 build:
   - name: resolve-spec
     src: .
-    engine: go://generic-builder
+    engine: forge://generic-builder
     spec:
       command: sh
       args:
@@ -24,71 +24,71 @@ build:
 
   - name: generate-mocks
     src: .
-    engine: go://generic-builder
+    engine: forge://generic-builder
     spec:
       command: mockery
 
   - name: format-code
     src: .
-    engine: go://go-format
+    engine: forge://go-format
 
   - name: forge-register
     src: ./cmd/forge-register
     dest: ./build/bin
-    engine: go://go-build
+    engine: forge://go-build
 
 test:
   - name: lint
-    runner: go://go-lint
+    runner: forge://go-lint
 
   - name: no-hardcoding
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/no-hardcoding.sh"]
 
   - name: standalone
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/standalone.sh"]
 
   - name: unwired
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/unwired.sh"]
 
   - name: architecture
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/architecture.sh"]
 
   - name: docs
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/docs-check.sh"]
 
   - name: unit
-    runner: go://go-test
+    runner: forge://go-test
 
   - name: conformance
-    runner: go://go-test
+    runner: forge://go-test
     spec:
       tags: [conformance]
       packages: [./test/conformance/...]
 
   - name: e2e
-    runner: go://go-test
+    runner: forge://go-test
     spec:
       tags: [e2e]
       packages: [./test/e2e/...]
       timeout: "15m"
 
   - name: coverage
-    runner: go://generic-test-runner
+    runner: forge://generic-test-runner
     spec:
       command: sh
       args: ["hack/coverage.sh", "90"]

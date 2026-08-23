@@ -16,7 +16,7 @@ import (
 const DefaultPath = "forge-register.yaml"
 
 var (
-	uriPattern = regexp.MustCompile(`^(go|alias)://.+`)
+	uriPattern = regexp.MustCompile(`^(forge|alias)://.+`)
 
 	// ErrInvalid wraps every validation problem, all reported at once.
 	ErrInvalid = errors.New("invalid register config")
@@ -82,9 +82,11 @@ func (r Register) Validate() error {
 
 	if strings.TrimSpace(r.State.Engine) == "" {
 		problems = append(problems, "state.engine is required")
+	} else if strings.HasPrefix(r.State.Engine, "go://") {
+		problems = append(problems, "state.engine: the go:// scheme is removed; use forge://")
 	} else if !uriPattern.MatchString(r.State.Engine) {
 		problems = append(problems, fmt.Sprintf(
-			"state.engine %q is not a go:// or alias:// URI", r.State.Engine))
+			"state.engine %q is not a forge:// or alias:// URI", r.State.Engine))
 	}
 
 	switch r.Params.AdmissionMaxSeverity {

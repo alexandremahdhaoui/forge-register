@@ -150,7 +150,7 @@ func newInstance(t *testing.T, upstreamURL string) instance {
 	require.NoError(t, os.WriteFile(config, []byte(fmt.Sprintf(`
 name: e2e-register
 state:
-  engine: go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git
+  engine: forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git
   spec:
     path: %s
 registries:

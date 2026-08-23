@@ -14,7 +14,7 @@ import (
 	"github.com/alexandremahdhaoui/forge-register/internal/types/regtypes"
 )
 
-const uri = "go://example.com/state@v1"
+const uri = "forge://example.com/state@v1"
 
 // memory answers like a state engine: put remembers, get returns, list keys.
 type memory struct {

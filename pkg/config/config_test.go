@@ -11,7 +11,7 @@ import (
 const valid = `
 name: golden-register
 state:
-  engine: go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git
+  engine: forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git
   spec:
     path: .
 params:
@@ -53,11 +53,28 @@ params:
 
 	for _, expect := range []string{
 		"name is required",
-		"not a go:// or alias:// URI",
+		"not a forge:// or alias:// URI",
 		"quarantineDays cannot be negative",
 		`"severe" is not critical, high, medium or low`,
 		"maxTracksPerPackage must be at least 1",
 	} {
 		require.ErrorContains(t, err, expect)
 	}
+}
+
+func TestTheGoSchemeIsRemoved(t *testing.T) {
+	_, err := config.Parse([]byte(`
+name: r
+state:
+  engine: go://x/cmd/ci-state-git
+params:
+  quarantineDays: 7
+  admissionMaxSeverity: critical
+  deprecateAfterDays: 30
+  staleAfterDays: 180
+  deprecatedGraceDays: 30
+  maxTracksPerPackage: 2
+`))
+	require.ErrorIs(t, err, config.ErrInvalid)
+	require.ErrorContains(t, err, "the go:// scheme is removed; use forge://")
 }

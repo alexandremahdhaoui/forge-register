@@ -27,7 +27,7 @@ const (
 
 	// The workspace's ci-state-git: built by TestMain onto PATH, so the
 	// resolver's LookPath finds the checkout's build rather than a stale tag.
-	stateEngine = "go://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git"
+	stateEngine = "forge://github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git"
 )
 
 type op struct {

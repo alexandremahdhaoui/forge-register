@@ -24,7 +24,7 @@ var now = time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 const configYAML = `
 name: test-register
 state:
-  engine: go://example.com/state
+  engine: forge://example.com/state
   spec:
     path: .
 params:
