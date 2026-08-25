@@ -3,6 +3,7 @@ package clidriver_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -37,10 +38,18 @@ params:
 `
 
 type harness struct {
-	out       *bytes.Buffer
-	store     *storeadaptermock.MockStore
-	discovery *discoverycontrollermock.MockDiscoverer
-	driver    *clidriver.Driver
+	out        *bytes.Buffer
+	store      *storeadaptermock.MockStore
+	discovery  *discoverycontrollermock.MockDiscoverer
+	driver     *clidriver.Driver
+	dispatched *dispatchCall
+}
+
+// dispatchCall records what add --dispatch sent instead of storing.
+type dispatchCall struct {
+	repo    string
+	request regtypes.Request
+	err     error
 }
 
 func newHarness(t *testing.T) harness {
@@ -49,11 +58,17 @@ func newHarness(t *testing.T) harness {
 	out := &bytes.Buffer{}
 	store := storeadaptermock.NewMockStore(t)
 	discovery := discoverycontrollermock.NewMockDiscoverer(t)
+	dispatched := &dispatchCall{}
 
 	driver := clidriver.New(clidriver.Deps{
 		Out:      out,
 		ReadFile: func(string) ([]byte, error) { return []byte(configYAML), nil },
 		Now:      func() time.Time { return now },
+		Dispatch: func(_ context.Context, repo string, request regtypes.Request) error {
+			dispatched.repo, dispatched.request = repo, request
+
+			return dispatched.err
+		},
 		Build: func(cfg config.Register) (*registercontroller.Controller, storeadapter.Store, error) {
 			params := regtypes.Params{
 				QuarantineDays:       cfg.Params.QuarantineDays,
@@ -68,7 +83,7 @@ func newHarness(t *testing.T) harness {
 		},
 	})
 
-	return harness{out: out, store: store, discovery: discovery, driver: driver}
+	return harness{out: out, store: store, discovery: discovery, driver: driver, dispatched: dispatched}
 }
 
 func TestValidateDescribesTheRegister(t *testing.T) {
@@ -265,4 +280,50 @@ func TestStatusReportsAStoreFailure(t *testing.T) {
 
 	err = h2.driver.Run(context.Background(), []string{"status"})
 	require.ErrorIs(t, err, os.ErrPermission)
+}
+
+// TestAddDispatchesInsteadOfStoring: --dispatch is the door for a
+// consumer with no write access - the request goes to the remote repo's
+// workflow and nothing touches the local store.
+func TestAddDispatchesInsteadOfStoring(t *testing.T) {
+	h := newHarness(t)
+
+	require.NoError(t, h.driver.Run(context.Background(), []string{
+		"add", "--reason", "a consumer needs it", "--dispatch", "org/golden-register",
+		"go:github.com/x/pkg",
+	}))
+
+	require.Equal(t, "org/golden-register", h.dispatched.repo)
+	require.Equal(t, "github.com/x/pkg", h.dispatched.request.Package)
+	require.Equal(t, regtypes.RequestAdmission, h.dispatched.request.Type)
+	require.Contains(t, h.out.String(), "dispatched go:github.com/x/pkg to org/golden-register")
+	// No PutRequest expectation: the remote workflow files it.
+}
+
+func TestAddReportsAFailedDispatch(t *testing.T) {
+	h := newHarness(t)
+	h.dispatched.err = errors.New("status 404: Not Found")
+
+	err := h.driver.Run(context.Background(), []string{
+		"add", "--reason", "a consumer needs it", "--dispatch", "org/golden-register",
+		"go:github.com/x/pkg",
+	})
+	require.ErrorContains(t, err, "status 404")
+}
+
+// TestStatusNamesAQuietTrack: silence with no successor is a fact the
+// report must surface, alongside the promise that the track stays
+// current.
+func TestStatusNamesAQuietTrack(t *testing.T) {
+	h := newHarness(t)
+
+	quiet := time.Date(2025, 11, 1, 0, 0, 0, 0, time.UTC)
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{{
+		Ecosystem: "go", Package: "github.com/x/quiet", Prefix: "2",
+		Current: "2.4.0", QuietSince: &quiet,
+	}}, nil).Once()
+	h.store.EXPECT().PendingRequests(mock.Anything).Return(nil, nil).Once()
+
+	require.NoError(t, h.driver.Run(context.Background(), []string{"status"}))
+	require.Contains(t, h.out.String(), `QUIET since 2025-11-01 (no successor; stays current)`)
 }

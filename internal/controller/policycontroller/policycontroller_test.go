@@ -474,3 +474,39 @@ func TestAFreshDisclosureOnCurrentOverridesTheHistory(t *testing.T) {
 	require.Equal(t, "1.2.1", v.Adopted)
 	require.Contains(t, v.Message, "security upgrade")
 }
+
+// TestEvaluateQuietNamesSilenceWithNoSuccessor: a track whose upstream
+// went quiet with nowhere to go is marked, stays current, and the mark
+// carries the last release date so re-evaluation is idempotent. Anything
+// else - a successor (deprecation's job), recent releases, no dates, an
+// already deprecated track - answers nil, which clears the mark.
+func TestEvaluateQuietNamesSilenceWithNoSuccessor(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
+	params := regtypes.Params{StaleAfterDays: 180}
+	old := now.AddDate(0, 0, -200)
+	recent := now.AddDate(0, 0, -10)
+
+	quiet := policyIn(regtypes.Track{}, false, old)
+	if got := policycontroller.EvaluateQuiet(quiet, now, params); got == nil || !got.Equal(old) {
+		t.Errorf("a quiet successorless track must carry its last release date, got %v", got)
+	}
+
+	for name, in := range map[string]policycontroller.DeprecationInput{
+		"a successor exists, deprecation's territory": policyIn(regtypes.Track{}, true, old),
+		"upstream released recently":                  policyIn(regtypes.Track{}, false, recent),
+		"no release dates known":                      policyIn(regtypes.Track{}, false, time.Time{}),
+		"already deprecated": policyIn(regtypes.Track{
+			Deprecated: &regtypes.Deprecation{Reason: regtypes.DeprecationStale, Since: now},
+		}, false, old),
+	} {
+		if got := policycontroller.EvaluateQuiet(in, now, params); got != nil {
+			t.Errorf("%s: must answer nil, got %v", name, got)
+		}
+	}
+}
+
+func policyIn(track regtypes.Track, hasSuccessor bool, last time.Time) policycontroller.DeprecationInput {
+	return policycontroller.DeprecationInput{Track: track, HasSuccessor: hasSuccessor, LastReleaseInPrefix: last}
+}

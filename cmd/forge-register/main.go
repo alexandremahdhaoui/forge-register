@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/alexandremahdhaoui/forge-register/internal/adapter/dispatchadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/engineadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/osvadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/registryadapter"
@@ -22,11 +23,16 @@ import (
 var version = "dev"
 
 func main() {
+	dispatcher := dispatchadapter.New(http.DefaultClient, "", os.Getenv("GITHUB_TOKEN"))
+
 	driver := clidriver.New(clidriver.Deps{
 		Out:      os.Stdout,
 		ReadFile: os.ReadFile,
 		Now:      time.Now,
 		Build:    build,
+		Dispatch: func(ctx context.Context, repo string, request regtypes.Request) error {
+			return dispatcher.File(ctx, repo, request)
+		},
 	})
 
 	if err := driver.Run(context.Background(), os.Args[1:]); err != nil {

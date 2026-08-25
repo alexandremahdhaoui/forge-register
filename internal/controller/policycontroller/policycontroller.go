@@ -373,6 +373,26 @@ func EvaluateDeprecation(in DeprecationInput, now time.Time, p regtypes.Params) 
 	return nil
 }
 
+// EvaluateQuiet names a track whose upstream went silent with nowhere to
+// go: past the stale window with no successor line, the track stays
+// current and carries the last release date, visibly. Deprecation needs a
+// successor to point at; silence without one is a fact worth naming, not
+// a retirement. The answer is the mark to store - nil clears it, so the
+// mark heals itself when upstream releases again or a successor appears.
+func EvaluateQuiet(in DeprecationInput, now time.Time, p regtypes.Params) *time.Time {
+	if in.Track.Deprecated != nil || in.HasSuccessor || in.LastReleaseInPrefix.IsZero() {
+		return nil
+	}
+
+	if now.Sub(in.LastReleaseInPrefix) <= time.Duration(p.StaleAfterDays)*day {
+		return nil
+	}
+
+	since := in.LastReleaseInPrefix
+
+	return &since
+}
+
 func currentVector(track regtypes.Track) regtypes.Vector {
 	if len(track.History) == 0 {
 		return regtypes.Vector{}

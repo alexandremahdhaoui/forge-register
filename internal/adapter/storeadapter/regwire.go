@@ -38,6 +38,8 @@ func trackToWire(t regtypes.Track) spec.Track {
 		}
 	}
 
+	wire.QuietSince = t.QuietSince
+
 	if t.Deprecated != nil {
 		wire.Deprecated = &spec.Deprecation{
 			Reason: spec.DeprecationReason(t.Deprecated.Reason),
@@ -98,6 +100,8 @@ func trackFromWire(payload []byte) (regtypes.Track, error) {
 			Since:    wire.Advisory.Since,
 		}
 	}
+
+	track.QuietSince = wire.QuietSince
 
 	if wire.Deprecated != nil {
 		track.Deprecated = &regtypes.Deprecation{

@@ -151,6 +151,11 @@ type Track struct {
 	History    []Entry
 	Advisory   *Advisory
 	Deprecated *Deprecation
+	// QuietSince is upstream's last release into the track, set by policy
+	// once the track has been quiet past the stale window with no
+	// successor line to deprecate toward. The track stays current; the
+	// mark clears when upstream releases again or a successor appears.
+	QuietSince *time.Time
 }
 
 // Request is the only door into the register.

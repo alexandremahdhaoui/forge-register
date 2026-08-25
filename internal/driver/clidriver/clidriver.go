@@ -29,6 +29,9 @@ type Deps struct {
 	Now      func() time.Time
 	// Build wires the controller and store for one parsed config.
 	Build func(cfg config.Register) (*registercontroller.Controller, storeadapter.Store, error)
+	// Dispatch files a request into a remote register repo the caller
+	// cannot write, via repository_dispatch. Used by add --dispatch.
+	Dispatch func(ctx context.Context, repo string, request regtypes.Request) error
 }
 
 type Driver struct {
@@ -46,7 +49,7 @@ forge-register keeps the catalog of adoptable package versions.
 
   forge-register validate  [--config forge-register.yaml]
   forge-register status    [--config ...]
-  forge-register add       [--config ...] <ecosystem>:<package> [--version v] [--track t] --reason "..."  [--requester who]
+  forge-register add       [--config ...] <ecosystem>:<package> [--version v] [--track t] --reason "..."  [--requester who] [--dispatch owner/repo]
   forge-register apply     [--config ...]   answer requests, then evaluate every track
   forge-register process   [--config ...]   answer pending requests only
   forge-register evaluate  [--config ...]   evaluate every track only
@@ -72,6 +75,7 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 	reason := flags.String("reason", "", "why - mandatory on requests")
 	requester := flags.String("requester", "", "who files the request")
 	provenance := flags.String("provenance", "", "the revision that proved an internal package")
+	dispatch := flags.String("dispatch", "", "owner/name of a register repo to file into remotely, via repository_dispatch (needs GITHUB_TOKEN)")
 	source := flags.String("source", "", "where an internal package comes from")
 
 	if err := flags.Parse(args[1:]); err != nil {
@@ -101,7 +105,10 @@ func (d *Driver) Run(ctx context.Context, args []string) error {
 	case "status":
 		return d.status(ctx, store)
 	case "add":
-		return d.add(ctx, store, flags.Args(), *version, *track, *reason, *requester, now)
+		return d.add(ctx, store, flags.Args(), addOptions{
+			Version: *version, Track: *track, Reason: *reason,
+			Requester: *requester, Dispatch: *dispatch,
+		}, now)
 	case "apply":
 		if err := d.report(ctx, "process", func() (registercontroller.Report, error) {
 			return controller.Process(ctx, now)
@@ -164,6 +171,11 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 				t.Deprecated.Reason, t.Deprecated.Since.Format("2006-01-02"))
 		}
 
+		if t.QuietSince != nil {
+			line += fmt.Sprintf("  QUIET since %s (no successor; stays current)",
+				t.QuietSince.Format("2006-01-02"))
+		}
+
 		if _, err := fmt.Fprintln(d.deps.Out, line); err != nil {
 			return fmt.Errorf("writing the report: %w", err)
 		}
@@ -189,7 +201,19 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 	return nil
 }
 
-func (d *Driver) add(ctx context.Context, store storeadapter.Store, args []string, version, track, reason, requester string, now time.Time) error {
+// addOptions is what one add carries beyond the package.
+type addOptions struct {
+	Version   string
+	Track     string
+	Reason    string
+	Requester string
+	// Dispatch names a remote register repo (owner/name) to file into via
+	// repository_dispatch, for a consumer with no write access. Empty
+	// files into the local checkout's store.
+	Dispatch string
+}
+
+func (d *Driver) add(ctx context.Context, store storeadapter.Store, args []string, opts addOptions, now time.Time) error {
 	if len(args) != 1 {
 		return fmt.Errorf("%w: add needs <ecosystem>:<package>", ErrUsage)
 	}
@@ -199,13 +223,28 @@ func (d *Driver) add(ctx context.Context, store storeadapter.Store, args []strin
 		return fmt.Errorf("%w: add needs <ecosystem>:<package>, got %q", ErrUsage, args[0])
 	}
 
-	if strings.TrimSpace(reason) == "" {
+	if strings.TrimSpace(opts.Reason) == "" {
 		return fmt.Errorf("%w: a request with no --reason is a config error, not a warning", ErrUsage)
 	}
 
 	request := regtypes.Request{
 		Type: regtypes.RequestAdmission, Package: pkg, Ecosystem: ecosystem,
-		Track: track, Version: version, Requester: requester, Reason: reason, CreatedAt: now,
+		Track: opts.Track, Version: opts.Version, Requester: opts.Requester,
+		Reason: opts.Reason, CreatedAt: now,
+	}
+
+	if opts.Dispatch != "" {
+		if err := d.deps.Dispatch(ctx, opts.Dispatch, request); err != nil {
+			return err
+		}
+
+		if _, err := fmt.Fprintf(d.deps.Out,
+			"dispatched %s:%s to %s. its request workflow files it and the pipeline answers.\n",
+			ecosystem, pkg, opts.Dispatch); err != nil {
+			return fmt.Errorf("writing the report: %w", err)
+		}
+
+		return nil
 	}
 
 	key := registercontroller.RequestKey(request, now)

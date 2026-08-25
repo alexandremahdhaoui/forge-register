@@ -360,6 +360,10 @@ func (c *Controller) maintain(track regtypes.Track, candidates []regtypes.Candid
 		Track: track, HasSuccessor: hasSuccessor, LastReleaseInPrefix: lastRelease,
 	}, now, c.params)
 
+	track.QuietSince = policycontroller.EvaluateQuiet(policycontroller.DeprecationInput{
+		Track: track, HasSuccessor: hasSuccessor, LastReleaseInPrefix: lastRelease,
+	}, now, c.params)
+
 	return track
 }
 
