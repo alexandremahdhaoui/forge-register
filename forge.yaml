@@ -100,6 +100,15 @@ test:
       command: sh
       args: ["hack/coverage.sh", "90"]
 
+  # The distribution build: every command cross-built CGO-off for the
+  # release, named by the <name>_<os>_<arch> travel convention. The
+  # pipeline's release stage globs build/dist into the aggregated release.
+  - name: dist
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/build-dist.sh"]
+
 factory:
   module: github.com/alexandremahdhaoui/forge-register
   goVersion: "1.26.5"
