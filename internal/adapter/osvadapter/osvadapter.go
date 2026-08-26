@@ -22,10 +22,13 @@ type Querier interface {
 	Vulns(ctx context.Context, ecosystem, pkg string, versions []string) (map[string][]regtypes.Vuln, string, error)
 }
 
-// ecosystems maps register ecosystems to OSV's names. Internal packages have
-// no feed: their admission path is proof, not policy.
+// ecosystems maps register ecosystems to OSV's names. Internal packages
+// enter by proof, not discovery - but they are public Go modules and their
+// vulnerabilities are as real as anyone's, so their vectors are asked
+// under OSV's Go ecosystem.
 var ecosystems = map[string]string{
 	"go":         "Go",
+	"internal":   "Go",
 	"rust":       "crates.io",
 	"python":     "PyPI",
 	"typescript": "npm",

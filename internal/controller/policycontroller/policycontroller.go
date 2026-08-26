@@ -39,9 +39,14 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 		}
 	}
 
+	// Internal versions enter by proof, and their dev labels ARE their
+	// version format - filtering prereleases would filter the whole track.
+	// Everywhere else a prerelease never upgrades a track on its own.
+	admitPrereleases := track.Ecosystem == "internal"
+
 	newer := make([]regtypes.Candidate, 0, len(candidates))
 	for _, c := range candidates {
-		if isPrerelease(c.Version) {
+		if isPrerelease(c.Version) && !admitPrereleases {
 			continue
 		}
 

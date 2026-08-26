@@ -2,6 +2,7 @@ package osvadapter_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -63,11 +64,45 @@ func TestVulnsClassifyBySeverityAndDigestTheSnapshot(t *testing.T) {
 func TestAnEcosystemWithoutAFeedAnswersEmpty(t *testing.T) {
 	q := osvadapter.New(nil, fakeOSV(t))
 
-	byVersion, digest, err := q.Vulns(context.Background(), "internal", "golden-spec",
+	byVersion, digest, err := q.Vulns(context.Background(), "papyrus", "scrolls",
 		[]string{"0.3.0"})
 	require.NoError(t, err)
 	require.Empty(t, byVersion)
 	require.NotEmpty(t, digest)
+}
+
+// Internal packages enter by proof, but they are public Go modules and
+// their vulnerabilities are as real as anyone's: the feed is asked under
+// OSV's Go ecosystem.
+func TestInternalPackagesAskTheGoFeed(t *testing.T) {
+	var asked string
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Queries []struct {
+				Package struct {
+					Ecosystem string `json:"ecosystem"`
+				} `json:"package"`
+			} `json:"queries"`
+		}
+
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
+		require.NotEmpty(t, in.Queries)
+		asked = in.Queries[0].Package.Ecosystem
+
+		_, _ = w.Write([]byte(`{"results":[{}]}`))
+	})
+
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+
+	q := osvadapter.New(nil, server.URL)
+
+	_, _, err := q.Vulns(context.Background(), "internal",
+		"github.com/example/toolchain-member", []string{"v0.1.0-dev.r00000001.gaaa"})
+	require.NoError(t, err)
+	require.Equal(t, "Go", asked)
 }
 
 func TestAShortBatchAnswerIsAnError(t *testing.T) {

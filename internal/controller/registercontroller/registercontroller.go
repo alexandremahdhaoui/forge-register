@@ -54,13 +54,7 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 	}
 
 	for _, track := range tracks {
-		// Internal packages advance by proof, never by discovery: they have
-		// no feed and no registry, and their door is Publish.
-		if track.Ecosystem == "internal" {
-			continue
-		}
-
-		candidates, snapshot, err := c.discovery.Discover(ctx, track.Ecosystem, track.Package)
+		candidates, snapshot, err := c.candidatesFor(ctx, track)
 		if err != nil {
 			report.Failed = append(report.Failed,
 				fmt.Sprintf("%s:%s: %v", track.Ecosystem, track.Package, err))
@@ -72,9 +66,17 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 		verdict.OSVSnapshot = snapshot
 
 		if verdict.Code == regtypes.VerdictAdopted {
-			track, err = c.advance(ctx, track, verdict.Adopted, candidates, snapshot, "", now)
-			if err != nil {
-				return Report{}, err
+			if track.Ecosystem == "internal" {
+				// The adopted version was already published by proof; only
+				// the pointer moves. A second history entry would shadow
+				// the provenance the published one carries.
+				track.Current = verdict.Adopted
+				track.UpdatedAt = now
+			} else {
+				track, err = c.advance(ctx, track, verdict.Adopted, candidates, snapshot, "", now)
+				if err != nil {
+					return Report{}, err
+				}
 			}
 
 			report.Adopted++
@@ -95,6 +97,30 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 	}
 
 	return report, nil
+}
+
+// candidatesFor answers what the upgrade policy weighs. Registry
+// ecosystems discover; internal tracks have no feed and no registry -
+// versions enter only through the publish proof door - so the published
+// history IS the candidate list, and only the vulnerability vectors are
+// asked fresh. That refresh is what raises an advisory on a toolchain
+// version the world learned something about, and what lets a published
+// fix advance a track the moment its vector improves.
+func (c *Controller) candidatesFor(ctx context.Context, track regtypes.Track) ([]regtypes.Candidate, string, error) {
+	if track.Ecosystem != "internal" {
+		return c.discovery.Discover(ctx, track.Ecosystem, track.Package)
+	}
+
+	published := make([]regtypes.Candidate, 0, len(track.History))
+	for _, entry := range track.History {
+		published = append(published, regtypes.Candidate{
+			Version:    entry.Version,
+			ReleasedAt: entry.ReleasedAt,
+			Vulns:      entry.Vulns,
+		})
+	}
+
+	return c.discovery.Refresh(ctx, track.Ecosystem, track.Package, published)
 }
 
 // Process answers every pending request. Answering a request is writing its

@@ -117,3 +117,89 @@ func (_c *MockDiscoverer_Discover_Call) RunAndReturn(run func(ctx context.Contex
 	_c.Call.Return(run)
 	return _c
 }
+
+// Refresh provides a mock function for the type MockDiscoverer
+func (_mock *MockDiscoverer) Refresh(ctx context.Context, ecosystem string, pkg string, published []regtypes.Candidate) ([]regtypes.Candidate, string, error) {
+	ret := _mock.Called(ctx, ecosystem, pkg, published)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Refresh")
+	}
+
+	var r0 []regtypes.Candidate
+	var r1 string
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, []regtypes.Candidate) ([]regtypes.Candidate, string, error)); ok {
+		return returnFunc(ctx, ecosystem, pkg, published)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, []regtypes.Candidate) []regtypes.Candidate); ok {
+		r0 = returnFunc(ctx, ecosystem, pkg, published)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]regtypes.Candidate)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, []regtypes.Candidate) string); ok {
+		r1 = returnFunc(ctx, ecosystem, pkg, published)
+	} else {
+		r1 = ret.Get(1).(string)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, []regtypes.Candidate) error); ok {
+		r2 = returnFunc(ctx, ecosystem, pkg, published)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockDiscoverer_Refresh_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Refresh'
+type MockDiscoverer_Refresh_Call struct {
+	*mock.Call
+}
+
+// Refresh is a helper method to define mock.On call
+//   - ctx context.Context
+//   - ecosystem string
+//   - pkg string
+//   - published []regtypes.Candidate
+func (_e *MockDiscoverer_Expecter) Refresh(ctx any, ecosystem any, pkg any, published any) *MockDiscoverer_Refresh_Call {
+	return &MockDiscoverer_Refresh_Call{Call: _e.mock.On("Refresh", ctx, ecosystem, pkg, published)}
+}
+
+func (_c *MockDiscoverer_Refresh_Call) Run(run func(ctx context.Context, ecosystem string, pkg string, published []regtypes.Candidate)) *MockDiscoverer_Refresh_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 []regtypes.Candidate
+		if args[3] != nil {
+			arg3 = args[3].([]regtypes.Candidate)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDiscoverer_Refresh_Call) Return(candidates []regtypes.Candidate, s string, err error) *MockDiscoverer_Refresh_Call {
+	_c.Call.Return(candidates, s, err)
+	return _c
+}
+
+func (_c *MockDiscoverer_Refresh_Call) RunAndReturn(run func(ctx context.Context, ecosystem string, pkg string, published []regtypes.Candidate) ([]regtypes.Candidate, string, error)) *MockDiscoverer_Refresh_Call {
+	_c.Call.Return(run)
+	return _c
+}
