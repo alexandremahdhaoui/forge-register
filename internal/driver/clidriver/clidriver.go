@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -32,6 +33,10 @@ type Deps struct {
 	// Dispatch files a request into a remote register repo the caller
 	// cannot write, via repository_dispatch. Used by add --dispatch.
 	Dispatch func(ctx context.Context, repo string, request regtypes.Request) error
+	// RemoteHead answers a repo's remote HEAD sha, for the status verb's
+	// staleness check on internal tracks. Nil, or an error, skips the
+	// check: status must keep working offline.
+	RemoteHead func(ctx context.Context, url string) (string, error)
 }
 
 type Driver struct {
@@ -157,6 +162,8 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 		return err
 	}
 
+	heads := map[string]string{}
+
 	for _, t := range tracks {
 		line := fmt.Sprintf("%s:%s track %s at %s", t.Ecosystem, t.Package, t.Prefix, t.Current)
 
@@ -174,6 +181,11 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 		if t.QuietSince != nil {
 			line += fmt.Sprintf("  QUIET since %s (no successor; stays current)",
 				t.QuietSince.Format("2006-01-02"))
+		}
+
+		if head, pinned, stale := d.staleInternal(ctx, t, heads); stale {
+			line += fmt.Sprintf("  STALE (pinned %s, repo at %s; a green workspace pipeline republishes)",
+				pinned, head)
 		}
 
 		if _, err := fmt.Fprintln(d.deps.Out, line); err != nil {
@@ -199,6 +211,57 @@ func (d *Driver) status(ctx context.Context, store storeadapter.Store) error {
 	}
 
 	return nil
+}
+
+// devSHA is the proven sha a dev label carries, e.g.
+// v0.1.0-dev.r00000035.g3a25e157e9a9.
+var devSHA = regexp.MustCompile(`\.g([0-9a-f]{7,40})$`)
+
+// staleInternal reports whether an internal track's current dev label
+// points behind the repo it catalogs. A consumer otherwise learns this
+// only when the resolved tuple fails to build - staleness must be
+// visible where the operator already looks. Best-effort: no prober, a
+// non-dev label or an unreachable remote skip the check silently, so
+// status keeps working offline.
+func (d *Driver) staleInternal(
+	ctx context.Context, t regtypes.Track, heads map[string]string,
+) (head, pinned string, stale bool) {
+	if d.deps.RemoteHead == nil || t.Ecosystem != "internal" || len(t.History) == 0 {
+		return "", "", false
+	}
+
+	match := devSHA.FindStringSubmatch(t.Current)
+	if match == nil {
+		return "", "", false
+	}
+
+	source := t.History[len(t.History)-1].Source
+	if source == "" {
+		return "", "", false
+	}
+
+	remote, cached := heads[source]
+	if !cached {
+		resolved, err := d.deps.RemoteHead(ctx, source)
+		if err != nil {
+			return "", "", false
+		}
+
+		remote = resolved
+		heads[source] = remote
+	}
+
+	pinned = match[1]
+	if strings.HasPrefix(remote, pinned) {
+		return "", "", false
+	}
+
+	head = remote
+	if len(head) > 12 {
+		head = head[:12]
+	}
+
+	return head, pinned, true
 }
 
 // addOptions is what one add carries beyond the package.

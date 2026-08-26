@@ -327,3 +327,84 @@ func TestStatusNamesAQuietTrack(t *testing.T) {
 	require.NoError(t, h.driver.Run(context.Background(), []string{"status"}))
 	require.Contains(t, h.out.String(), `QUIET since 2025-11-01 (no successor; stays current)`)
 }
+
+// TestStatusMarksAStaleInternalTrack: an internal track pinned behind
+// its repo's HEAD is the failure a consumer otherwise meets only when
+// the resolved tuple no longer builds. Status must say it, and say what
+// republishes it.
+func TestStatusMarksAStaleInternalTrack(t *testing.T) {
+	h := newHarness(t)
+
+	probes := 0
+	driver := clidriver.New(clidriver.Deps{
+		Out:      h.out,
+		ReadFile: func(string) ([]byte, error) { return []byte(configYAML), nil },
+		Now:      func() time.Time { return now },
+		Build: func(config.Register) (*registercontroller.Controller, storeadapter.Store, error) {
+			return registercontroller.New(h.store, nil, regtypes.Params{}), h.store, nil
+		},
+		RemoteHead: func(_ context.Context, url string) (string, error) {
+			probes++
+
+			require.Equal(t, "git@github.com:o/stale.git", url)
+
+			return "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef", nil
+		},
+	})
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{
+		{
+			Ecosystem: "internal", Package: "github.com/o/stale", Prefix: "0",
+			Current: "v0.1.0-dev.r00000027.g954127a605c5",
+			History: []regtypes.Entry{{Source: "git@github.com:o/stale.git"}},
+		},
+		{
+			Ecosystem: "internal", Package: "github.com/o/fresh", Prefix: "0",
+			Current: "v0.1.0-dev.r00000035.gbeefbeefbeef",
+			History: []regtypes.Entry{{Source: "git@github.com:o/stale.git"}},
+		},
+		{
+			Ecosystem: "go", Package: "github.com/x/tagged", Prefix: "1",
+			Current: "1.2.3",
+			History: []regtypes.Entry{{Source: "https://example.com/x"}},
+		},
+	}, nil).Once()
+	h.store.EXPECT().PendingRequests(mock.Anything).Return(nil, nil).Once()
+
+	require.NoError(t, driver.Run(context.Background(), []string{"status"}))
+
+	report := h.out.String()
+	require.Contains(t, report,
+		"STALE (pinned 954127a605c5, repo at beefbeefbeef; a green workspace pipeline republishes)")
+	require.NotContains(t, report, "gbeefbeefbeef  STALE", "a current pin must not be marked")
+	require.NotContains(t, report, "1.2.3  STALE", "non-internal tracks are not probed")
+	require.Equal(t, 1, probes, "one probe per source url, cached across tracks")
+}
+
+// TestStatusStaysQuietWhenTheProbeFails: staleness is best-effort; an
+// offline machine still gets its report.
+func TestStatusStaysQuietWhenTheProbeFails(t *testing.T) {
+	h := newHarness(t)
+
+	driver := clidriver.New(clidriver.Deps{
+		Out:      h.out,
+		ReadFile: func(string) ([]byte, error) { return []byte(configYAML), nil },
+		Now:      func() time.Time { return now },
+		Build: func(config.Register) (*registercontroller.Controller, storeadapter.Store, error) {
+			return registercontroller.New(h.store, nil, regtypes.Params{}), h.store, nil
+		},
+		RemoteHead: func(context.Context, string) (string, error) {
+			return "", errors.New("no network")
+		},
+	})
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{{
+		Ecosystem: "internal", Package: "github.com/o/stale", Prefix: "0",
+		Current: "v0.1.0-dev.r00000027.g954127a605c5",
+		History: []regtypes.Entry{{Source: "git@github.com:o/stale.git"}},
+	}}, nil).Once()
+	h.store.EXPECT().PendingRequests(mock.Anything).Return(nil, nil).Once()
+
+	require.NoError(t, driver.Run(context.Background(), []string{"status"}))
+	require.NotContains(t, h.out.String(), "STALE")
+}

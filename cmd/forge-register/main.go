@@ -10,6 +10,7 @@ import (
 
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/dispatchadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/engineadapter"
+	"github.com/alexandremahdhaoui/forge-register/internal/adapter/gitprobeadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/osvadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/registryadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/storeadapter"
@@ -32,6 +33,9 @@ func main() {
 		Build:    build,
 		Dispatch: func(ctx context.Context, repo string, request regtypes.Request) error {
 			return dispatcher.File(ctx, repo, request)
+		},
+		RemoteHead: func(ctx context.Context, url string) (string, error) {
+			return gitprobeadapter.New().RemoteHead(ctx, url)
 		},
 	})
 
