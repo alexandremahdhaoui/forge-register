@@ -36,6 +36,7 @@ build:
     src: ./cmd/forge-register
     dest: ./build/bin
     engine: forge://go-build
+    platforms: [linux/amd64, linux/arm64]
 
 # The CLI as a first class run target. Every toolchain runnable declares
 # forge-self-factory: the model has no exceptions.
@@ -106,8 +107,8 @@ test:
   - name: dist
     runner: forge://generic-test-runner
     spec:
-      command: sh
-      args: ["hack/build-dist.sh"]
+      command: forge
+      args: ["build", "--platforms", "linux/amd64,linux/arm64"]
 
 factory:
   module: github.com/alexandremahdhaoui/forge-register
