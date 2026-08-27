@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/alexandremahdhaoui/forge-register/internal/types/regtypes"
 )
@@ -98,28 +99,50 @@ func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []stri
 			pkg, len(out.Results), len(versions))
 	}
 
-	severities := map[string]regtypes.Severity{}
+	known := map[string]details{}
 	byVersion := make(map[string][]regtypes.Vuln, len(versions))
 	snapshot := make([]string, 0, len(versions))
 
 	for i, version := range versions {
 		var vulns []regtypes.Vuln
 
+		// Every version answered gets a snapshot line, even a clean one.
+		// Without it a package with no vulnerabilities digests to the
+		// sha256 of nothing - which is also what a feed that was never
+		// asked digests to, so "clean" and "unmeasured" became the same
+		// record. They are not the same claim.
+		snapshot = append(snapshot, version+" queried")
+
 		for _, v := range out.Results[i].Vulns {
-			severity, ok := severities[v.ID]
+			d, ok := known[v.ID]
 			if !ok {
 				var err error
 
-				severity, err = h.severityOf(ctx, v.ID)
+				d, err = h.detailsOf(ctx, v.ID)
 				if err != nil {
 					return nil, "", err
 				}
 
-				severities[v.ID] = severity
+				known[v.ID] = d
 			}
 
-			vulns = append(vulns, regtypes.Vuln{ID: v.ID, Severity: severity})
-			snapshot = append(snapshot, version+" "+v.ID+" "+string(severity))
+			// A withdrawn record is one the feed took back. It is not an
+			// advisory any more and must not gate anything.
+			if d.withdrawn {
+				continue
+			}
+
+			vulns = append(vulns, regtypes.Vuln{
+				ID:              v.ID,
+				Severity:        d.severity,
+				Introduced:      d.introduced,
+				FixedIn:         d.fixed,
+				AffectedImports: d.imports,
+			})
+
+			snapshot = append(snapshot, version+" "+v.ID+" "+string(d.severity)+
+				" fixed="+strings.Join(d.fixed, ",")+
+				" imports="+strings.Join(d.imports, ","))
 		}
 
 		byVersion[version] = vulns
@@ -128,55 +151,149 @@ func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []stri
 	return byVersion, digestOf(snapshot), nil
 }
 
-// severityOf resolves one vulnerability's severity. Anything the feed cannot
-// classify counts as high downstream, so unknown maps to an empty severity.
-func (h *HTTP) severityOf(ctx context.Context, id string) (regtypes.Severity, error) {
+// details is everything a consumer needs from one OSV record. The feed
+// answers a question about a package; whether a given consumer is affected
+// is a different question, answered later against that consumer's own
+// imports, so this reads facts and decides nothing.
+type details struct {
+	severity   regtypes.Severity
+	introduced []string
+	fixed      []string
+	imports    []string
+	withdrawn  bool
+}
+
+// detailsOf reads one vulnerability record whole. Everything here was
+// discarded before: the range events that say whether a fix exists, and the
+// import paths that say what the advisory actually covers. Events are
+// unioned across every affected block, because a record commonly splits one
+// vulnerability across branches (a stdlib line and a module line, say) and
+// the fix a consumer needs may live in any of them.
+func (h *HTTP) detailsOf(ctx context.Context, id string) (details, error) {
 	var body struct {
+		Withdrawn        string `json:"withdrawn"`
 		DatabaseSpecific struct {
 			Severity string `json:"severity"`
 		} `json:"database_specific"`
-		Severity []struct {
-			Type  string `json:"type"`
-			Score string `json:"score"`
-		} `json:"severity"`
+		Affected []struct {
+			Ranges []struct {
+				Events []struct {
+					Introduced   string `json:"introduced"`
+					Fixed        string `json:"fixed"`
+					LastAffected string `json:"last_affected"`
+				} `json:"events"`
+			} `json:"ranges"`
+			EcosystemSpecific struct {
+				Imports []struct {
+					Path string `json:"path"`
+				} `json:"imports"`
+			} `json:"ecosystem_specific"`
+		} `json:"affected"`
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.base+"/v1/vulns/"+id, nil)
+	raw, err := h.getJSON(ctx, h.base+"/v1/vulns/"+id, id, &body)
 	if err != nil {
-		return "", fmt.Errorf("building request for %s: %w", id, err)
+		return details{}, err
+	}
+
+	_ = raw
+
+	out := details{severity: severityFrom(body.DatabaseSpecific.Severity), withdrawn: body.Withdrawn != ""}
+
+	introduced := map[string]bool{}
+	fixed := map[string]bool{}
+	paths := map[string]bool{}
+
+	for _, affected := range body.Affected {
+		for _, r := range affected.Ranges {
+			for _, e := range r.Events {
+				if e.Introduced != "" {
+					introduced[e.Introduced] = true
+				}
+
+				// last_affected closes a range without naming a fix, so it
+				// is deliberately not folded in here: a version that ends
+				// the affected range is not a version that fixes anything.
+				if e.Fixed != "" {
+					fixed[e.Fixed] = true
+				}
+			}
+		}
+
+		for _, imp := range affected.EcosystemSpecific.Imports {
+			if imp.Path != "" {
+				paths[imp.Path] = true
+			}
+		}
+	}
+
+	out.introduced = sortedKeys(introduced)
+	out.fixed = sortedKeys(fixed)
+	out.imports = sortedKeys(paths)
+
+	return out, nil
+}
+
+// severityFrom maps OSV's word to ours. A word the feed does not publish
+// stays empty, and empty counts as high downstream - conservative by
+// decision, and the emptiness is preserved rather than invented so a
+// consumer can tell "unknown" from "low".
+func severityFrom(word string) regtypes.Severity {
+	switch word {
+	case "CRITICAL":
+		return regtypes.SeverityCritical
+	case "HIGH":
+		return regtypes.SeverityHigh
+	case "MODERATE", "MEDIUM":
+		return regtypes.SeverityMedium
+	case "LOW":
+		return regtypes.SeverityLow
+	}
+
+	return ""
+}
+
+func sortedKeys(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+
+	sort.Strings(out)
+
+	return out
+}
+
+func (h *HTTP) getJSON(ctx context.Context, u, what string, out any) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("building request for %s: %w", what, err)
 	}
 
 	res, err := h.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("reading vulnerability %s: %w", id, err)
+		return nil, fmt.Errorf("reading vulnerability %s: %w", what, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("reading vulnerability %s: status %d", id, res.StatusCode)
+		return nil, fmt.Errorf("reading vulnerability %s: status %d", what, res.StatusCode)
 	}
 
 	raw, err := io.ReadAll(res.Body)
 	if err != nil {
-		return "", fmt.Errorf("reading vulnerability %s: %w", id, err)
+		return nil, fmt.Errorf("reading vulnerability %s: %w", what, err)
 	}
 
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return "", fmt.Errorf("decoding vulnerability %s: %w", id, err)
+	if err := json.Unmarshal(raw, out); err != nil {
+		return nil, fmt.Errorf("decoding vulnerability %s: %w", what, err)
 	}
 
-	switch body.DatabaseSpecific.Severity {
-	case "CRITICAL":
-		return regtypes.SeverityCritical, nil
-	case "HIGH":
-		return regtypes.SeverityHigh, nil
-	case "MODERATE", "MEDIUM":
-		return regtypes.SeverityMedium, nil
-	case "LOW":
-		return regtypes.SeverityLow, nil
-	}
-
-	return "", nil
+	return raw, nil
 }
 
 func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {

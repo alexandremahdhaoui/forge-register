@@ -1,0 +1,115 @@
+{
+  "_comment": [
+    "What the register's OSV parser MUST extract from each record in",
+    "osv-records.json. These are assertions, stated by hand, not computed",
+    "from the records - a fixture that derives its own expectations proves",
+    "nothing, because the same bug would produce both sides.",
+    "",
+    "Keys match the ids in osv-records.json exactly.",
+    "",
+    "Fields today's parser does not read at all:",
+    "  fixed            from affected[].ranges[].events[].fixed",
+    "  introduced       from affected[].ranges[].events[].introduced",
+    "  affectedImports  from affected[].ecosystem_specific.imports[].path",
+    "",
+    "Field today's parser does read:",
+    "  severity         from database_specific.severity",
+    "",
+    "severity null means OSV published none. By the rule recorded in",
+    "FOLLOWUP.md line 186 dated 2026-08-20, unknown counts as high. That is a",
+    "decision, not a defect. It is stated here so a test pins the decision",
+    "rather than rediscovering it.",
+    "",
+    "Rationale lives in advisory-gate-findings.md."
+  ],
+
+  "expected": {
+    "GO-2026-5932": {
+      "severity": null,
+      "introduced": ["0"],
+      "fixed": [],
+      "fixExists": false,
+      "affectedImports": [
+        "golang.org/x/crypto/openpgp",
+        "golang.org/x/crypto/openpgp/armor",
+        "golang.org/x/crypto/openpgp/clearsign",
+        "golang.org/x/crypto/openpgp/elgamal",
+        "golang.org/x/crypto/openpgp/errors",
+        "golang.org/x/crypto/openpgp/packet",
+        "golang.org/x/crypto/openpgp/s2k"
+      ],
+      "hasImportScope": true
+    },
+
+    "RUSTSEC-2022-0040": {
+      "severity": null,
+      "introduced": ["0.0.0-0"],
+      "fixed": [],
+      "fixExists": false,
+      "affectedImports": [],
+      "hasImportScope": false
+    },
+
+    "GHSA-29mw-wpgm-hmr9": {
+      "severity": "MODERATE",
+      "introduced": ["4.0.0"],
+      "fixed": ["4.17.21"],
+      "fixExists": true,
+      "affectedImports": [],
+      "hasImportScope": false
+    },
+
+    "GHSA-9wx4-h78v-vm56": {
+      "severity": "MODERATE",
+      "introduced": ["0"],
+      "fixed": ["2.32.0"],
+      "fixExists": true,
+      "affectedImports": [],
+      "hasImportScope": false
+    },
+
+    "GHSA-4v7x-pqxf-cx7m": {
+      "severity": "MODERATE",
+      "introduced": ["0", "1.22.0-0"],
+      "fixed": ["0.23.0", "1.21.9", "1.22.2"],
+      "fixExists": true,
+      "affectedImports": [],
+      "hasImportScope": false
+    }
+  },
+
+  "expectedQueries": {
+    "golang.org/x/crypto@0.55.0": {
+      "vulnIds": ["GO-2026-5932"],
+      "note": "One advisory. No version clears it, so the track has no upgrade target."
+    },
+    "github.com/spf13/cobra@1.10.2": {
+      "vulnIds": [],
+      "note": "Genuinely clean. Must be distinguishable from the stub's empty answer, whose digest e3b0c44298fc1c14 is the sha256 of empty input and appears in 521 of 533 golden-register verdicts."
+    }
+  },
+
+  "gateOutcomes": {
+    "_comment": [
+      "What the gate should DO with each, given the workspace imports only",
+      "golang.org/x/crypto/nacl/box and nothing from openpgp.",
+      "These are the cases the current gate gets wrong or cannot express."
+    ],
+    "GO-2026-5932": {
+      "currentBehaviour": "blocks resolution permanently",
+      "correctBehaviour": "not applicable: no affected import path is reached",
+      "clearedBy": "reachability"
+    },
+    "RUSTSEC-2022-0040": {
+      "currentBehaviour": "blocks resolution permanently",
+      "correctBehaviour": "unresolvable by reachability: crates.io publishes no import scope",
+      "clearedBy": "an auditable waiver only",
+      "note": "This case is why a waiver is mandatory rather than optional. Import scoping is a Go-only remedy."
+    },
+    "GHSA-29mw-wpgm-hmr9": {
+      "currentBehaviour": "raises a standing advisory",
+      "correctBehaviour": "advance the track to the fixed version",
+      "clearedBy": "reading the fixed event"
+    }
+  }
+}

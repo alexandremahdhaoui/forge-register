@@ -79,6 +79,21 @@ func (v Vector) String() string {
 type Vuln struct {
 	ID       string
 	Severity Severity
+
+	// Introduced and FixedIn are the range events OSV publishes, unioned
+	// across every affected block of the record. An empty FixedIn means the
+	// feed names no fixed version - which is a fact worth reading rather
+	// than assuming, because "no fix upstream" was asserted for a year by
+	// code that never looked.
+	Introduced []string
+	FixedIn    []string
+
+	// AffectedImports are the import paths the advisory is scoped to, where
+	// the ecosystem publishes them (largely a Go convention). Empty means
+	// the feed gave no scope, NOT that everything is affected - the
+	// difference decides whether a consumer can clear an advisory on the
+	// merits, so the two must never collapse into one.
+	AffectedImports []string
 }
 
 // VectorOf folds vulnerabilities into a vector. An unrecognised severity
