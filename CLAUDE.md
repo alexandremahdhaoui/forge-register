@@ -57,5 +57,11 @@ forge build
 forge test-all
 ```
 
-Stages are lint, no-hardcoding, standalone, engine-docs, unwired,
-architecture, docs, unit, conformance, e2e and coverage (90).
+Stages are lint, unread-fields, no-hardcoding, standalone, unwired,
+architecture, docs, unit, unit-nonroot, conformance, e2e and coverage (90).
+
+`unit-nonroot` runs the same tests as a user who cannot write to `/`. Root
+hides a test that names an absolute path and then creates it, and that is
+how three defects left here green and arrived on a colleague's machine red.
+The stage checks it can actually lose the privilege before trusting its own
+green.
