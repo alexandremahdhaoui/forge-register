@@ -49,6 +49,15 @@ test:
   - name: lint
     runner: forge://go-lint
 
+  # Every field a captured record carries is read, or explicitly ignored with
+  # a reason. The parser read one field out of the record for a year and
+  # every test passed, because the fixtures encoded the same blind spot.
+  - name: unread-fields
+    runner: forge://generic-test-runner
+    spec:
+      command: sh
+      args: ["hack/unread-fields.sh"]
+
   - name: no-hardcoding
     runner: forge://generic-test-runner
     spec:
