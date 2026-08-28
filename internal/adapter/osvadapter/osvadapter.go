@@ -126,9 +126,13 @@ type batchQuery struct {
 }
 
 type batchResult struct {
+	// querybatch answers an id and a modified timestamp per record. Only
+	// the id is used - the full record is fetched by id, and adoption dates
+	// come from the register - so the timestamp is not declared. A field
+	// declared and never used reads as guarded to the unread-fields gate,
+	// which subtracts struct tags, and is guarded by nothing.
 	Vulns []struct {
-		ID       string `json:"id"`
-		Modified string `json:"modified"`
+		ID string `json:"id"`
 	} `json:"vulns"`
 	NextPageToken string `json:"next_page_token"`
 }

@@ -1,6 +1,14 @@
 package osvadapter
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,12 +44,10 @@ func TestARepeatedIDIsReadOnce(t *testing.T) {
 
 	all.Vulns = append(all.Vulns,
 		struct {
-			ID       string `json:"id"`
-			Modified string `json:"modified"`
+			ID string `json:"id"`
 		}{ID: "GHSA-1"},
 		struct {
-			ID       string `json:"id"`
-			Modified string `json:"modified"`
+			ID string `json:"id"`
 		}{ID: "GHSA-1"})
 
 	h := &HTTP{records: map[string]record{"GHSA-1": {ID: "GHSA-1"}}}
@@ -121,6 +127,14 @@ func TestCVSSScoringMatchesTheSpecification(t *testing.T) {
 		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N", regtypes.SeverityLow,
 			"no impact at all scores zero"},
 		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", regtypes.SeverityHigh, "7.5"},
+		// The other two band edges. Only 9.0 was pinned, so moving high to
+		// 7.5 or medium to 4.5 changed nothing any test could see - and a
+		// score landing exactly on a boundary is the one place a consumer
+		// most needs the answer to be the published one.
+		{"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L", regtypes.SeverityHigh,
+			"exactly 7.0, the low edge of high"},
+		{"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:N/A:N", regtypes.SeverityMedium,
+			"exactly 4.0, the low edge of medium"},
 
 		// The three below sit on a band edge and each isolates one rule.
 		// Every one of them was scored a whole band low before, and no
@@ -162,4 +176,160 @@ func TestEveryPublishedSeverityWordIsRead(t *testing.T) {
 	} {
 		require.Equal(t, want, severityOfWord(word), "word %q", word)
 	}
+}
+
+// Every record marked severitySource "cvss" in the expectations also carries
+// a GHSA alias publishing the same word. So the alias fallback reproduced the
+// expected answer on its own, and gutting the CVSS parser left both
+// integration tests green - including the one that counts sources, because
+// counting a source is not checking which one answered.
+//
+// Cut the aliases and the database_specific word out of those records and the
+// vector is the only thing left that can answer.
+func TestACVSSAnsweredRecordNeedsNoAlias(t *testing.T) {
+	rawIn, err := os.ReadFile("../../../testdata/osv-records.json")
+	require.NoError(t, err)
+
+	var in struct {
+		Records map[string]json.RawMessage `json:"records"`
+	}
+
+	require.NoError(t, json.Unmarshal(rawIn, &in))
+
+	rawWant, err := os.ReadFile("../../../testdata/osv-expected.json")
+	require.NoError(t, err)
+
+	var want struct {
+		Parse map[string]struct {
+			Severity       string `json:"severity"`
+			SeveritySource string `json:"severitySource"`
+		} `json:"parse"`
+	}
+
+	require.NoError(t, json.Unmarshal(rawWant, &want))
+
+	checked := 0
+
+	for id, p := range want.Parse {
+		if p.SeveritySource != "cvss" {
+			continue
+		}
+
+		var doc map[string]any
+		require.NoError(t, json.Unmarshal(in.Records[id], &doc))
+
+		delete(doc, "aliases")
+		delete(doc, "database_specific")
+
+		stripped, err := json.Marshal(doc)
+		require.NoError(t, err)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(stripped)
+		}))
+
+		rec, err := New(nil, srv.URL).fetchRecord(context.Background(), id)
+		srv.Close()
+		require.NoError(t, err)
+
+		require.Equal(t, p.Severity, string(rec.Severity),
+			"%s has no alias and no database_specific word left, so its CVSS "+
+				"vector is the only thing that can answer", id)
+
+		checked++
+	}
+
+	require.Positive(t, checked, "the fixture must contain CVSS-answered records")
+}
+
+// Four lines nothing drove, each of which reads as a correct answer when it
+// is wrong.
+func TestTheFeedsOwnFailuresAreErrors(t *testing.T) {
+	t.Run("a truncated batch is an error, not an empty answer", func(t *testing.T) {
+		// Degrading to not-found here records "the feed carries no record
+		// for this package" for a package the feed simply did not answer
+		// about. That is the unmeasured-reads-as-examined bug again.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, `{"results":[]}`)
+		}))
+		t.Cleanup(srv.Close)
+
+		answers, _, err := New(nil, srv.URL).
+			Vulns(context.Background(), "go", "p", []string{"v1.0.0"})
+		require.NoError(t, err)
+
+		// Unreachable, never not-found: the feed did not say this package
+		// has no records, it failed to answer. Recording that as not-found
+		// puts an unmeasured package in the measured bucket.
+		require.Equal(t, regtypes.OutcomeUnreachable, answers["v1.0.0"].Outcome)
+		require.Contains(t, answers["v1.0.0"].Reason, "answered 0 of")
+	})
+
+	t.Run("a feed that never stops paging is an error, not a hang", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			// The same token forever, which is what a broken feed does.
+			_, _ = io.WriteString(w,
+				`{"results":[{"vulns":[],"next_page_token":"always"},`+
+					`{"vulns":[],"next_page_token":"always"}]}`)
+		}))
+		t.Cleanup(srv.Close)
+
+		answers, _, err := New(nil, srv.URL).
+			Vulns(context.Background(), "go", "p", []string{"v1.0.0"})
+		require.NoError(t, err)
+		require.Equal(t, regtypes.OutcomeUnreachable, answers["v1.0.0"].Outcome)
+		require.Contains(t, answers["v1.0.0"].Reason, "kept paging past")
+	})
+}
+
+func TestACleanAnswerStillDigestsToSomething(t *testing.T) {
+	// A package with no vulnerabilities and a feed nobody ever asked both
+	// produce an empty snapshot, and sha256 of nothing is the same digest
+	// either way. The per-version line is what tells them apart, and every
+	// migrated record in the register carries that empty digest today - so
+	// this is not hypothetical.
+	// The feed knows the package and its one record does not cover this
+	// version. That is measured-clean, and it is the answer that has to
+	// digest to something.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w,
+			`{"results":[{"vulns":[{"id":"X-1"}]},{"vulns":[]}]}`)
+	})
+	mux.HandleFunc("/v1/vulns/X-1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"X-1","affected":[{`+
+			`"package":{"name":"p","ecosystem":"Go"},`+
+			`"ranges":[{"type":"SEMVER","events":[{"introduced":"2.0.0"}]}]}]}`)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	answers, snapshot, err := New(nil, srv.URL).
+		Vulns(context.Background(), "go", "p", []string{"v1.0.0"})
+	require.NoError(t, err)
+	require.Equal(t, regtypes.OutcomeClean, answers["v1.0.0"].Outcome)
+
+	empty := sha256.Sum256(nil)
+	require.NotEqual(t, "sha256:"+hex.EncodeToString(empty[:])[:16], snapshot,
+		"a measured-clean package digests the same as one nobody asked about")
+}
+
+func TestEqualVersionsPutIntroducedFirst(t *testing.T) {
+	// A range naming the same version as introduced and as fixed covers it:
+	// the walk sets inside on introduced and clears it on fixed, so the
+	// order of the two decides the answer. Sorting fixed first reports the
+	// version clean.
+	sorted := sortedEvents([]rangeEvent{{Fixed: "1.0.0"}, {Introduced: "1.0.0"}})
+	require.Equal(t, "1.0.0", sorted[0].Introduced)
+	require.Equal(t, "1.0.0", sorted[1].Fixed)
+}
+
+func TestNoImpactIsLowWhateverTheArithmeticSays(t *testing.T) {
+	// All-none impact under changed scope rounds to 4.0, which is medium.
+	// CVSS defines a zero-impact vector as 0.0, and the guard is what says
+	// so; without it a vector that affects nothing reads as medium.
+	got, ok := severityOfVector("CVSS_V3", "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:N/I:N/A:N")
+	require.True(t, ok)
+	require.Equal(t, regtypes.SeverityLow, got)
 }

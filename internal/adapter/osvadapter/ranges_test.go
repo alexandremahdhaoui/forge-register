@@ -1,6 +1,10 @@
 package osvadapter
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -135,6 +139,20 @@ func TestTheRangeWalkFollowsTheSpecification(t *testing.T) {
 			version: "1.0.post1", want: true,
 			why: "PEP 440 puts a post-release after its release, not before it",
 		},
+		{
+			name:    "introduced 0 covers a Go pseudo-version",
+			a:       block(ev("introduced", "0"), ev("fixed", "0.17.0")),
+			version: "v0.0.0-20200220183623-bac4c82f6975", want: true,
+			why: "\"0\" is the beginning of time and not a version to compare " +
+				"against: a pseudo-version sorts below it, so without the special " +
+				"case every introduced-0 advisory - the commonest shape there is - " +
+				"stopped covering the commonest Go version format, silently",
+		},
+		{
+			name:    "and it still ends where the fix lands",
+			a:       block(ev("introduced", "0"), ev("fixed", "0.17.0")),
+			version: "v0.18.0", want: false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, why := coversVersion(tc.a, tc.version)
@@ -143,6 +161,68 @@ func TestTheRangeWalkFollowsTheSpecification(t *testing.T) {
 			if got {
 				require.NotEmpty(t, why, "a match must say which range covered us")
 			}
+		})
+	}
+}
+
+// The table above builds events in Go, so it says nothing about the JSON
+// tags that put them there. A renamed tag left every event empty and the
+// walk answered "not covered" for everything - a green suite and a silent
+// false negative on every advisory. This drives the real decode.
+func TestTheRangeWalkReadsTheWireShape(t *testing.T) {
+	const raw = `{
+	  "id": "X-1",
+	  "affected": [{
+	    "package": {"name": "p", "ecosystem": "Go"},
+	    "ranges": [
+	      {"type": "SEMVER",
+	       "events": [{"introduced": "1.0.0"}, {"fixed": "1.5.0"}]},
+	      {"type": "SEMVER",
+	       "events": [{"introduced": "3.0.0"}, {"limit": "4.0.0"}]}
+	    ],
+	    "versions": ["1.9.9"],
+	    "ecosystem_specific": {"imports": [{"path": "p/q"}]}
+	  }]
+	}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, raw)
+	}))
+	t.Cleanup(srv.Close)
+
+	h := New(nil, srv.URL)
+
+	rec, err := h.fetchRecord(context.Background(), "X-1")
+	require.NoError(t, err)
+	require.Len(t, rec.Affected, 1)
+
+	a := rec.Affected[0]
+	require.Equal(t, "p", a.Name)
+	require.Equal(t, "Go", a.Ecosystem)
+	require.Equal(t, []string{"p/q"}, a.Imports)
+
+	for _, tc := range []struct {
+		version string
+		want    bool
+		why     string
+	}{
+		{"1.2.0", true, "inside the range and below the limit"},
+		{"1.6.0", false, "at or past the fix"},
+		// The limit is the specification's pre-test: at or above it the
+		// whole range is skipped before the walk runs. No captured record
+		// uses it, so losing this tag made every limited range unlimited
+		// and no fixture could see it. The second range carries no fix, so
+		// the limit is the only thing that can exclude 5.0.0 - a case where
+		// a fix would also exclude it proves nothing about the limit.
+		{"3.5.0", true, "inside the second range and below its limit"},
+		{"5.0.0", false, "at or above the limit, so that range does not apply"},
+		// An explicit version list is its own statement and does not need
+		// the events to agree with it.
+		{"1.9.9", true, "named in versions[]"},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			got, _ := coversVersion(a, tc.version)
+			require.Equal(t, tc.want, got, tc.why)
 		})
 	}
 }

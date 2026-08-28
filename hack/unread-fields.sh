@@ -41,18 +41,12 @@ ignored = {
     "related": "adjacent records, not this one",
     "credits": "who reported it",
     "upstream": "the record this was derived from",
-    "database_specific": "read one level down, for severity",
-    "ecosystem_specific": "read one level down, for imports",
-    "package": "read one level down, for name and ecosystem",
     "purl": "the same package, spelled another way",
-    "type": "the range kind, read as Type",
-    "score": "read on the severity entry",
     "source": "which database an affected block came from",
     "cwe_ids": "a weakness taxonomy, not a version range",
     "github_reviewed": "GitHub's own workflow state",
     "github_reviewed_at": "the same",
     "nvd_published_at": "NVD's date; the advisory's own published date is used",
-    "severity": "read at the top level and as a word in database_specific",
     "review_status": "the publishing database's workflow state",
     "url": "a link out",
     "license": "the record's licence",
@@ -119,6 +113,21 @@ def walk(node, path=""):
 
 for r in records.values():
     walk(r)
+
+# An entry that names a field the parser DOES read is the hole this exists
+# to close: the field could stop being read and the gate would stay green,
+# because ignored is subtracted whether or not anything reads it. Six such
+# entries sat here, so severity, score and four others were unguarded.
+both = sorted(read & set(ignored))
+if both:
+    print("these are read AND listed as ignored, so nothing guards them:",
+          file=sys.stderr)
+    for k in both:
+        print("  %s - %s" % (k, ignored[k]), file=sys.stderr)
+    print("", file=sys.stderr)
+    print("Remove them from `ignored`. A field is read or it is ignored, "
+          "never both.", file=sys.stderr)
+    sys.exit(1)
 
 unread = sorted(k for k in seen if k not in read and k not in ignored)
 
