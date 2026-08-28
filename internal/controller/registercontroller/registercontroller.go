@@ -376,11 +376,15 @@ func (c *Controller) maintain(track regtypes.Track, candidates []regtypes.Candid
 		track.Reason = current.Reason
 
 		if !(regtypes.Answer{Outcome: current.Outcome}).Measured() {
-			// Nothing was measured, so nothing is asserted. An advisory
-			// raised on an absence of knowledge is a guess with a severity
-			// attached to it.
-			track.Advisory = nil
-
+			// Nothing was measured, so nothing changes. An advisory raised on
+			// an absence of knowledge is a guess with a severity attached to
+			// it - and an advisory CLEARED on an absence of knowledge is
+			// worse, because it unblocks every consumer of a version still
+			// known to be vulnerable, and the next run cannot tell it ever
+			// existed. A feed outage is the ordinary way this outcome
+			// happens, so it must not be a way to withdraw a finding.
+			//
+			// The advisory therefore stands exactly as it was, untouched.
 			return c.maintainWindows(track, hasSuccessor, lastRelease, now)
 		}
 

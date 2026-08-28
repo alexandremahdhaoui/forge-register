@@ -13,8 +13,18 @@ import (
 func parseVersion(s string) ([]int, string) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
 
+	// Build metadata is not part of precedence. Semver says so outright, and
+	// the OSV schema warns that event versions may have it stripped, so
+	// "2.0.0+incompatible" and "2.0.0" have to compare equal. Treating the
+	// metadata as a pre-release tail sorted the module BELOW the version an
+	// advisory names as introducing it, and a real finding read as clean.
+	// +incompatible is ordinary Go vocabulary, straight off the proxy.
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		s = s[:i]
+	}
+
 	pre := ""
-	if i := strings.IndexAny(s, "-+"); i >= 0 {
+	if i := strings.IndexByte(s, '-'); i >= 0 {
 		pre = s[i+1:]
 		s = s[:i]
 	}
@@ -76,12 +86,30 @@ func CompareVersions(a, b string) int {
 		}
 	}
 
+	apost, bpost := isPostRelease(apre), isPostRelease(bpre)
+
 	switch {
 	case apre == bpre:
 		return 0
 	case apre == "":
+		// A bare release outranks a pre-release and is outranked by a post.
+		if bpost {
+			return -1
+		}
+
 		return 1
 	case bpre == "":
+		if apost {
+			return 1
+		}
+
+		return -1
+	case apost != bpost:
+		// A post-release outranks a pre-release of the same version.
+		if apost {
+			return 1
+		}
+
 		return -1
 	}
 
@@ -90,6 +118,27 @@ func CompareVersions(a, b string) int {
 
 // comparePrerelease orders pre-release tags the semver way: dot-separated
 // identifiers, numeric ones numerically, and a shorter tag sorts first.
+// isPostRelease reports a PEP 440 post-release or revision tail. These sort
+// ABOVE their release: 1.0.post1 comes after 1.0, where a pre-release comes
+// before it. Reading one as a pre-release put it below the version an
+// advisory introduced at, so the finding read as clean.
+func isPostRelease(tail string) bool {
+	t := strings.ToLower(strings.TrimLeft(tail, ".-_"))
+
+	if strings.HasPrefix(t, "post") || strings.HasPrefix(t, "rev") {
+		return true
+	}
+
+	// PEP 440 also spells a post-release ".r1". A bare "r" prefix is too
+	// greedy on its own - it swallows "rc1", which is a release candidate
+	// and sorts the other way - so the digit is required.
+	if len(t) > 1 && t[0] == 'r' && t[1] >= '0' && t[1] <= '9' {
+		return true
+	}
+
+	return false
+}
+
 func comparePrerelease(a, b string) int {
 	as, bs := strings.Split(a, "."), strings.Split(b, ".")
 
@@ -156,7 +205,10 @@ func InPrefix(version, prefix string) bool {
 func isPrerelease(version string) bool {
 	_, pre := parseVersion(version)
 
-	return pre != ""
+	// A post-release is not a pre-release. Reading "1.0.post1" as one meant
+	// policy never adopted it, and the same mistake put +incompatible Go
+	// modules permanently out of reach.
+	return pre != "" && !isPostRelease(pre)
 }
 
 // IsPrerelease is isPrerelease for callers outside the package: the register

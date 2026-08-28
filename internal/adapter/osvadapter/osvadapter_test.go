@@ -505,17 +505,61 @@ func TestAWithdrawnRecordNeverGates(t *testing.T) {
 	}
 }
 
+// What a package costs to read, and why each part of the cost exists.
+//
+// This measured 111 requests for one package at one version: 55 records, plus
+// an alias hop for every one of them - including the 54 that covered no
+// version we hold and were discarded immediately. Asking a second version of
+// the same package cost 111 more.
+//
+// Two rules bring it down, and this pins both. A record is fetched once and
+// remembered: it is immutable, so one fetch serves every version and every
+// alias naming it. And the alias hop is asked only for a record that actually
+// matched, because that is the only record whose severity anybody reads.
+func TestReadingAPackageCostsOneFetchPerRecord(t *testing.T) {
+	in, want := load(t)
+
+	f := newFeed(t, in, 0)
+	q := osvadapter.New(nil, f.URL, osvadapter.WithWarner(func(string, ...any) {}))
+
+	const pkg = "golang.org/x/crypto"
+
+	named := len(in.Packages[osvKey("go", pkg)].Vulns)
+	require.Greater(t, named, 20, "the fixture must carry a package worth measuring")
+
+	_, _, err := q.Vulns(context.Background(), "go", pkg, []string{"v0.55.0"})
+	require.NoError(t, err)
+
+	first := f.fetches
+
+	require.Equal(t, named, first,
+		"one fetch per record the package named, and no alias hop for a record "+
+			"that covered nothing")
+
+	// A second version of the same package re-reads nothing.
+	_, _, err = q.Vulns(context.Background(), "go", pkg, []string{"v0.17.0"})
+	require.NoError(t, err)
+
+	second := f.fetches - first
+
+	require.Less(t, second, named,
+		"the records are already known; only aliases of the newly matched "+
+			"findings can still need fetching")
+
+	t.Logf("%d records: %d fetches for the first version, %d more for the second",
+		named, first, second)
+
+	_ = want
+}
+
 // Why the CVSS step exists at all.
 //
-// Measured over the captured set it resolves nothing new: all 26 records it
-// answers are answered identically by the alias hop. What it does is answer
-// locally. Reading a vector costs nothing; asking the aliases costs an HTTP
-// fetch per record.
+// Measured over the captured set it resolves nothing new: every record it
+// answers is answered identically by the alias hop. What it does is answer
+// locally. Reading a vector costs nothing; asking the aliases costs a fetch.
 //
-// So the proof is a budget rather than a single record. Every record whose
-// severity comes from an alias must chase one; every record answered by the
-// word or the vector must not. Delete the CVSS step and 26 records start
-// chasing, and the sweep goes over budget.
+// So the proof is a budget. Only a record with no database word and no vector
+// may reach for an alias. Delete the CVSS step and 26 records start chasing.
 func TestTheCVSSStepPaysForItselfInFetches(t *testing.T) {
 	in, want := load(t)
 
@@ -549,9 +593,6 @@ func TestTheCVSSStepPaysForItselfInFetches(t *testing.T) {
 	require.Positive(t, bySource["cvss"], "the fixture must contain CVSS-answered records")
 	require.Positive(t, bySource["alias"], "and alias-answered ones, or the budget is trivial")
 
-	// Every named record is fetched once. On top of that, only the records
-	// with no word and no vector may reach for an alias; each of those may
-	// chase every alias it lists before one answers.
 	maxAliasHops := 0
 
 	for id := range named {
@@ -568,14 +609,43 @@ func TestTheCVSSStepPaysForItselfInFetches(t *testing.T) {
 	budget := len(named) + maxAliasHops
 
 	require.LessOrEqual(t, f.fetches, budget,
-		"%d fetches against a budget of %d (%d records named, at most %d alias hops). "+
-			"Records answered by a CVSS vector must not be reaching for their aliases.",
+		"%d fetches against a budget of %d (%d records, at most %d alias hops). "+
+			"Records answered by a CVSS vector must not reach for their aliases.",
 		f.fetches, budget, len(named), maxAliasHops)
 
-	t.Logf("%d fetches, budget %d: %d named records, %d answered by the database word, "+
+	t.Logf("%d fetches, budget %d: %d records, %d answered by the database word, "+
 		"%d by a CVSS vector, %d by an alias, %d with no severity anywhere",
 		f.fetches, budget, len(named), bySource["word"], bySource["cvss"],
 		bySource["alias"], bySource[""])
+}
+
+// One record failing to load is a feed condition, not a programming fault.
+//
+// It used to abort the entire run - and inside Process, after verdicts had
+// already been written, leaving a half-answered request set. Rate limiting is
+// the realistic trigger, so a single 429 was worse than a full outage, which
+// merely warned.
+func TestOneUnreadableRecordDoesNotAbortTheRun(t *testing.T) {
+	in, _ := load(t)
+
+	f := newFeed(t, in, 0)
+	f.failRecord("GO-2026-5932", http.StatusTooManyRequests)
+
+	var warnings []string
+
+	q := osvadapter.New(nil, f.URL, osvadapter.WithWarner(func(format string, args ...any) {
+		warnings = append(warnings, fmtWarn(format, args...))
+	}))
+
+	answers, _, err := q.Vulns(context.Background(), "go", "golang.org/x/crypto", []string{"v0.55.0"})
+	require.NoError(t, err, "the feed refusing one record is not a programming fault")
+
+	got := answers["v0.55.0"]
+	require.Equal(t, regtypes.OutcomeUnreachable, got.Outcome,
+		"nothing was measured, and that is what the record has to say")
+	require.False(t, got.Measured())
+	require.Contains(t, got.Reason, "429")
+	require.NotEmpty(t, warnings)
 }
 
 func osvKey(ecosystem, pkg string) string {

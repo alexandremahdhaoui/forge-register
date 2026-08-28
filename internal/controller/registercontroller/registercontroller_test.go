@@ -595,3 +595,51 @@ func TestAnUnmeasuredVersionRaisesNoAdvisory(t *testing.T) {
 		})
 	}
 }
+
+// A feed outage must never withdraw a finding.
+//
+// Refusing to raise an advisory on an absence of knowledge is right.
+// Clearing one on the same absence is the same mistake pointed the other way,
+// and far worse: an advisory pierces every pin, so withdrawing it unblocks
+// every consumer of a version still known to be vulnerable - and the write is
+// committed, so the next run cannot tell the finding ever existed. An OSV
+// outage is the ordinary way an unmeasured outcome happens.
+func TestAFeedOutageNeverWithdrawsAnAdvisory(t *testing.T) {
+	for _, outcome := range []regtypes.Outcome{regtypes.OutcomeUnreachable, regtypes.OutcomeNotFound} {
+		t.Run(string(outcome), func(t *testing.T) {
+			h := newHarness(t)
+
+			standing := &regtypes.Advisory{
+				VulnIDs: []string{"CVE-9"}, Severity: regtypes.SeverityCritical,
+				Since: days(30), FixedIn: []string{"1.2.0"},
+			}
+
+			track := regtypes.Track{
+				Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "1.1.0",
+				Vulns: regtypes.Vector{Critical: 1}, Outcome: regtypes.OutcomeFindings,
+				Advisory: standing,
+			}
+
+			h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+			h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
+				Return([]regtypes.Candidate{{
+					Version: "1.1.0", ReleasedAt: days(90),
+					Outcome: outcome, Reason: "the vulnerability feed could not be reached",
+				}}, "", nil).Once()
+
+			var written regtypes.Track
+
+			h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+
+			_, err := h.c.Evaluate(context.Background(), now)
+			require.NoError(t, err)
+
+			require.NotNil(t, written.Advisory,
+				"the feed said nothing, so the advisory has not been withdrawn")
+			require.Equal(t, []string{"CVE-9"}, written.Advisory.VulnIDs)
+			require.Equal(t, regtypes.SeverityCritical, written.Advisory.Severity)
+			require.Equal(t, days(30), written.Advisory.Since, "and it keeps its own date")
+		})
+	}
+}

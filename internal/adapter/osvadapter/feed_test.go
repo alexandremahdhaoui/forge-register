@@ -88,6 +88,20 @@ type feed struct {
 	batches  int
 	fetches  int
 	pageSize int
+	failing  map[string]int
+}
+
+// failRecord makes one id answer with a status instead of a body, which is
+// what rate limiting looks like from here.
+func (f *feed) failRecord(id string, status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if f.failing == nil {
+		f.failing = map[string]int{}
+	}
+
+	f.failing[id] = status
 }
 
 func newFeed(t *testing.T, in captured, pageSize int) *feed {
@@ -179,6 +193,16 @@ func newFeed(t *testing.T, in captured, pageSize int) *feed {
 		f.mu.Lock()
 		f.fetches++
 		f.mu.Unlock()
+
+		f.mu.Lock()
+		status := f.failing[id]
+		f.mu.Unlock()
+
+		if status != 0 {
+			http.Error(w, `{"code":8,"message":"rate limited"}`, status)
+
+			return
+		}
 
 		body, ok := in.Records[id]
 		if !ok {

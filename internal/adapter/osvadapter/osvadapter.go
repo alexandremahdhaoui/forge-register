@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexandremahdhaoui/forge-register/internal/types/regtypes"
@@ -69,6 +70,13 @@ type HTTP struct {
 	// warn reports what a human needs to know but must not be stopped by.
 	// It is a field so a test can read the warnings instead of the terminal.
 	warn func(format string, args ...any)
+
+	// records is every record read so far, by id. A record is immutable, so
+	// one fetch serves every version and every alias that names it. Without
+	// it a single package cost 111 requests and the next version of the same
+	// package cost 111 more.
+	mu      sync.Mutex
+	records map[string]record
 }
 
 var _ Querier = (*HTTP)(nil)
@@ -91,8 +99,9 @@ func New(client *http.Client, base string, opts ...Option) *HTTP {
 	}
 
 	h := &HTTP{
-		client: client,
-		base:   base,
+		client:  client,
+		base:    base,
+		records: map[string]record{},
 		warn: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "WARN "+format+"\n", args...)
 		},
@@ -200,13 +209,25 @@ func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []stri
 
 	records, err := h.recordsOf(ctx, results[0])
 	if err != nil {
-		return nil, "", err
+		// One record failing to load is the same condition as the batch
+		// failing: the feed did not answer, so nothing was measured. It used
+		// to abort the whole run - and in Process, after verdicts had already
+		// been written - which made a single 429 during rate limiting worse
+		// than an outage.
+		reason := fmt.Sprintf("the vulnerability feed could not be read: %v", err)
+		h.warn("%s %s: %s - nothing was checked", ecosystem, pkg, reason)
+
+		for _, v := range versions {
+			out[v] = regtypes.Answer{Outcome: regtypes.OutcomeUnreachable, Reason: reason}
+		}
+
+		return out, digestOf(nil), nil
 	}
 
 	snapshot := make([]string, 0, len(versions))
 
 	for i, version := range versions {
-		vulns := h.match(records, osvEco, pkg, version)
+		vulns := h.match(ctx, records, osvEco, pkg, version)
 
 		// Every version answered gets a snapshot line, even a clean one.
 		// Without it a package with no vulnerabilities digests to the
@@ -380,7 +401,7 @@ func (h *HTTP) recordsOf(ctx context.Context, all batchResult) ([]record, error)
 
 		seen[v.ID] = true
 
-		r, err := h.recordOf(ctx, v.ID, 0)
+		r, err := h.recordOf(ctx, v.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -400,7 +421,7 @@ func (h *HTTP) recordsOf(ctx context.Context, all batchResult) ([]record, error)
 // match decides, from the records themselves, which advisories cover one
 // version. This is the whole reason the package-wide query exists: the
 // answer comes from what the feed published, never from what it filtered.
-func (h *HTTP) match(records []record, osvEco, pkg, version string) []regtypes.Vuln {
+func (h *HTTP) match(ctx context.Context, records []record, osvEco, pkg, version string) []regtypes.Vuln {
 	var out []regtypes.Vuln
 
 	for _, r := range records {
@@ -412,6 +433,13 @@ func (h *HTTP) match(records []record, osvEco, pkg, version string) []regtypes.V
 			covered, why := coversVersion(a, version)
 			if !covered {
 				continue
+			}
+
+			// The alias hop happens here, not while reading every record the
+			// feed carries: it costs a round trip, and a record that covers
+			// none of our versions was about to be discarded.
+			if r.Severity == "" {
+				r.Severity = h.severityFromAliases(ctx, r.Aliases)
 			}
 
 			out = append(out, vulnOf(r, a, why))
@@ -455,9 +483,14 @@ func vulnOf(r record, a affected, why string) regtypes.Vuln {
 		}
 	}
 
+	// An import entry with no path is not a scope. Carried through, the empty
+	// string reads as a package everything imports.
 	paths := map[string]bool{}
+
 	for _, p := range a.Imports {
-		paths[p] = true
+		if p != "" {
+			paths[p] = true
+		}
 	}
 
 	return regtypes.Vuln{
@@ -472,9 +505,24 @@ func vulnOf(r record, a affected, why string) regtypes.Vuln {
 	}
 }
 
-// coversVersion walks one affected block the way OSV defines it. An explicit
-// versions list is an exact membership test. A range is a walk over events in
-// published order, each one opening or closing the affected window.
+// coversVersion walks one affected block the way the OSV specification
+// defines it. An explicit versions list is an exact membership test. A range
+// is a walk over its events, each one opening or closing the affected window.
+//
+// Two things the specification is explicit about and the obvious reading is
+// not.
+//
+// Events are sorted before the walk. OSV says sorting in the document is
+// recommended but not required, and its reference algorithm sorts. Walking
+// published order instead means a record that lists {fixed 1.0.0} before
+// {introduced 0} - schema-valid, and nothing rejects it - would report every
+// version of the package as affected forever.
+//
+// Limits are a separate test, not another window-closer. A version is inside
+// a range only if it is below at least one limit, and "*" is infinity.
+// Treating a limit as a sequential close made "*" cancel the whole range, and
+// made a second, higher limit shrink the window instead of widening it. Both
+// are false negatives.
 //
 // GIT ranges are skipped: they are commit hashes, and comparing a semver
 // against a sha answers nothing.
@@ -490,10 +538,14 @@ func coversVersion(a affected, version string) (bool, string) {
 			continue
 		}
 
+		if !beforeLimits(vr.Events, version) {
+			continue
+		}
+
 		inside := false
 		why := ""
 
-		for _, e := range vr.Events {
+		for _, e := range sortedEvents(vr.Events) {
 			switch {
 			case e.Introduced != "":
 				// "0" means from the beginning of time.
@@ -513,10 +565,6 @@ func coversVersion(a affected, version string) (bool, string) {
 				} else if inside {
 					why += ", last affected " + e.LastAffected
 				}
-			case e.Limit != "":
-				if regtypes.CompareVersions(version, e.Limit) >= 0 {
-					inside = false
-				}
 			}
 		}
 
@@ -526,6 +574,77 @@ func coversVersion(a affected, version string) (bool, string) {
 	}
 
 	return false, ""
+}
+
+// beforeLimits answers the specification's own pre-test: with no limits every
+// version passes, and with limits a version must be below at least one.
+func beforeLimits(events []rangeEvent, version string) bool {
+	found := false
+
+	for _, e := range events {
+		if e.Limit == "" {
+			continue
+		}
+
+		found = true
+
+		// "*" is infinity, so nothing is ever above it.
+		if e.Limit == "*" || regtypes.CompareVersions(version, e.Limit) < 0 {
+			return true
+		}
+	}
+
+	return !found
+}
+
+// sortedEvents orders a range's events by version, the way the reference
+// algorithm does. Limits take no part in the walk, so they are dropped here
+// and answered by beforeLimits instead. An introduced event sorts first at an
+// equal version: that version is affected from it.
+func sortedEvents(in []rangeEvent) []rangeEvent {
+	out := make([]rangeEvent, 0, len(in))
+
+	for _, e := range in {
+		if e.Limit == "" {
+			out = append(out, e)
+		}
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		vi, ri := eventVersion(out[i])
+		vj, rj := eventVersion(out[j])
+
+		// "0" opens the range and always sorts first.
+		switch {
+		case vi == "0" && vj != "0":
+			return true
+		case vj == "0" && vi != "0":
+			return false
+		}
+
+		if c := regtypes.CompareVersions(vi, vj); c != 0 {
+			return c < 0
+		}
+
+		return ri < rj
+	})
+
+	return out
+}
+
+// eventVersion answers an event's version and its rank at an equal version:
+// introduced first, so a version named by both is affected.
+func eventVersion(e rangeEvent) (string, int) {
+	switch {
+	case e.Introduced != "":
+		return e.Introduced, 0
+	case e.Fixed != "":
+		return e.Fixed, 1
+	case e.LastAffected != "":
+		return e.LastAffected, 1
+	}
+
+	return "", 2
 }
 
 // baseEcosystem drops the suffix an ecosystem may carry. OSV writes
@@ -545,7 +664,32 @@ func baseEcosystem(name string) string {
 // the aliases, and only after all three does severity stay unknown.
 //
 // depth guards the alias hop: one hop, never a cycle.
-func (h *HTTP) recordOf(ctx context.Context, id string, depth int) (record, error) {
+func (h *HTTP) recordOf(ctx context.Context, id string) (record, error) {
+	// One fetch per id, however many versions ask about it and however many
+	// records name it as an alias. Without this a single package cost 111
+	// requests: 55 records plus an alias hop for each of them, and the next
+	// version of the same package cost 111 more.
+	h.mu.Lock()
+	cached, ok := h.records[id]
+	h.mu.Unlock()
+
+	if ok {
+		return cached, nil
+	}
+
+	got, err := h.fetchRecord(ctx, id)
+	if err != nil {
+		return record{}, err
+	}
+
+	h.mu.Lock()
+	h.records[id] = got
+	h.mu.Unlock()
+
+	return got, nil
+}
+
+func (h *HTTP) fetchRecord(ctx context.Context, id string) (record, error) {
 	var body struct {
 		ID               string   `json:"id"`
 		Withdrawn        string   `json:"withdrawn"`
@@ -635,19 +779,20 @@ func (h *HTTP) recordOf(ctx context.Context, id string, depth int) (record, erro
 		out.Affected = append(out.Affected, block)
 	}
 
-	if out.Severity == "" && depth == 0 {
-		out.Severity = h.severityFromAliases(ctx, body.Aliases)
-	}
-
 	return out, nil
 }
 
-// severityFromAliases asks the records this one is an alias of. A Go or
-// PyPI advisory routinely publishes no severity while the GitHub record it
-// aliases publishes one for the same vulnerability.
+// severityFromAliases asks the records this one is an alias of. A Go or PyPI
+// advisory routinely publishes no severity while the GitHub record it aliases
+// publishes one for the same vulnerability.
+//
+// This is asked only for a record that matched a version we hold. Asking it
+// for every record the feed carries cost one round trip each, for records
+// that were about to be discarded. An alias's own aliases are not followed:
+// one hop, so a cycle cannot exist rather than being bounded out of one.
 func (h *HTTP) severityFromAliases(ctx context.Context, aliases []string) regtypes.Severity {
 	for _, alias := range aliases {
-		other, err := h.recordOf(ctx, alias, 1)
+		other, err := h.recordOf(ctx, alias)
 		if err != nil {
 			// An alias we cannot read is not a failure of this record.
 			continue
