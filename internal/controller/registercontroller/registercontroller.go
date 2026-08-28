@@ -88,12 +88,17 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 			return Report{}, fmt.Errorf("evaluating %s: %w", track.Package, err)
 		}
 
-		key := autoKey(track, now)
-		if err := c.store.PutVerdict(ctx, key, verdict); err != nil {
-			return Report{}, fmt.Errorf("evaluating %s: %w", track.Package, err)
-		}
-
-		report.Verdicts = append(report.Verdicts, KeyedVerdict{Key: key, Verdict: verdict})
+		// An evaluation verdict is not stored. It says what the run decided
+		// and is returned, printed and logged; the index file it changed is
+		// committed beside it, so git already records the decision with the
+		// commit that caused it. Writing one record per track per run
+		// produced 496 files here, thirteen of them for a single track all
+		// carrying the identical sentence.
+		//
+		// A request verdict is different and is still written: it is what
+		// closes the request, and PendingRequests reads it.
+		report.Verdicts = append(report.Verdicts,
+			KeyedVerdict{Key: autoKey(track, now), Verdict: verdict})
 	}
 
 	return report, nil
@@ -298,12 +303,9 @@ func (c *Controller) Publish(ctx context.Context, ecosystem, pkg, version, sourc
 		verdict.Message = fmt.Sprintf("track %s is already at %s", prefix, track.Current)
 	}
 
-	key := autoKey(track, now)
-	if err := c.store.PutVerdict(ctx, key, verdict); err != nil {
-		return KeyedVerdict{}, fmt.Errorf("publishing %s: %w", pkg, err)
-	}
-
-	return KeyedVerdict{Key: key, Verdict: verdict}, nil
+	// Not stored, for the same reason: a publish already writes the index
+	// entry it produced, and that commit is the record.
+	return KeyedVerdict{Key: autoKey(track, now), Verdict: verdict}, nil
 }
 
 // advance moves the track to the adopted version and records what was

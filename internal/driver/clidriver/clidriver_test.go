@@ -138,7 +138,9 @@ func TestApplyAnswersRequestsThenEvaluates(t *testing.T) {
 	h.store.EXPECT().Track(mock.Anything, "rust", "example-crate", "1").
 		Return(regtypes.Track{}, false, nil).Once()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Twice()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+	// One write, not two: the admission verdict closes the request, and the
+	// evaluation verdict is returned and printed rather than stored.
+	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 	h.store.EXPECT().Tracks(mock.Anything).
 		Return([]regtypes.Track{{
 			Package: "example-crate", Ecosystem: "rust", Prefix: "1", Current: "1.0.0",
@@ -183,7 +185,6 @@ func TestPublishRecordsTheProof(t *testing.T) {
 	h.store.EXPECT().Track(mock.Anything, "internal", "github.com/example/spec", "0").
 		Return(regtypes.Track{}, false, nil).Once()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	require.NoError(t, h.driver.Run(context.Background(),
 		[]string{"publish", "--provenance", "213ecaf37e78", "internal:github.com/example/spec", "0.3.0"}))

@@ -67,12 +67,15 @@ func TestEvaluateAdvancesATrackAndWritesTheVerdict(t *testing.T) {
 
 	var verdict regtypes.Verdict
 
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).
-		Run(func(_ context.Context, _ string, v regtypes.Verdict) { verdict = v }).Return(nil).Once()
-
 	report, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Adopted)
+
+	// The decision is returned and printed, and the index commit beside it
+	// is what records it. Storing one file per track per run produced 496
+	// records in golden-register, thirteen of them identical for one track.
+	require.Len(t, report.Verdicts, 1)
+	verdict = report.Verdicts[0].Verdict
 
 	require.Equal(t, "1.1.0", written.Current)
 	require.Equal(t, "sha256:snap", written.OSVSnapshot)
@@ -92,14 +95,11 @@ func TestEvaluateWritesUpToDateRatherThanSilence(t *testing.T) {
 		Return([]regtypes.Candidate{{Version: "1.1.0", ReleasedAt: days(90)}}, "sha256:snap", nil).Once()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Once()
 
-	var verdict regtypes.Verdict
-
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).
-		Run(func(_ context.Context, _ string, v regtypes.Verdict) { verdict = v }).Return(nil).Once()
-
-	_, err := h.c.Evaluate(context.Background(), now)
+	report, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
-	require.Equal(t, regtypes.VerdictUpToDate, verdict.Code)
+	require.Len(t, report.Verdicts, 1)
+	require.Equal(t, regtypes.VerdictUpToDate, report.Verdicts[0].Verdict.Code,
+		"an evaluation that changes nothing still says so, in the report")
 }
 
 func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
@@ -123,7 +123,6 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(2)
 
 	_, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -260,7 +259,6 @@ func TestPublishIsTheProofDoor(t *testing.T) {
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	kv, err := h.c.Publish(context.Background(), "internal", "github.com/example/spec",
 		"0.3.0", "git@github.com:example/spec.git", "213ecaf37e78", now)
@@ -280,7 +278,6 @@ func TestPublishOfAnOlderVersionMovesNothing(t *testing.T) {
 		Return(regtypes.Track{
 			Package: "github.com/example/spec", Ecosystem: "internal", Prefix: "0", Current: "0.3.0",
 		}, true, nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	kv, err := h.c.Publish(context.Background(), "internal", "github.com/example/spec",
 		"0.2.0", "", "abc", now)
@@ -310,7 +307,6 @@ func TestAnAdvisoryNamesItsHighestSeverity(t *testing.T) {
 
 		h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 			Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-		h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 		_, err := h.c.Evaluate(context.Background(), now)
 		require.NoError(t, err)
@@ -364,7 +360,6 @@ func TestAFeedFailureHidesNoOtherTrack(t *testing.T) {
 	h.discovery.EXPECT().Refresh(mock.Anything, "internal", "spec", mock.Anything).
 		Return([]regtypes.Candidate{}, "s2", nil).Once()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Twice()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
 
 	report, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -408,7 +403,6 @@ func TestAnInternalTrackWeighsOnlyTheVersionItIsOn(t *testing.T) {
 			}}, "sha256:snap", nil
 		}).Once()
 
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	_, err := h.c.Evaluate(context.Background(), now)
@@ -440,7 +434,6 @@ func TestAnInternalDisclosureRaisesTheAdvisory(t *testing.T) {
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	_, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -469,7 +462,6 @@ func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	_, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -486,7 +478,6 @@ func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 
 	h2.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h2.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	_, err = h2.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -526,7 +517,6 @@ func TestAnAdvisoryCarriesTheFixTheScopeAndTheRealDate(t *testing.T) {
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	_, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -564,7 +554,6 @@ func TestAnUnclassifiedFindingSaysUnknownRatherThanHigh(t *testing.T) {
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 	_, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
@@ -595,7 +584,6 @@ func TestAnUnmeasuredVersionRaisesNoAdvisory(t *testing.T) {
 
 			h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
 				Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-			h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 			_, err := h.c.Evaluate(context.Background(), now)
 			require.NoError(t, err)
