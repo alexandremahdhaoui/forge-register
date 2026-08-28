@@ -397,16 +397,22 @@ func (c *Controller) maintain(track regtypes.Track, candidates []regtypes.Candid
 		switch {
 		case (current.Vulns == regtypes.Vector{}) || fixExists:
 			track.Advisory = nil
-		case track.Advisory == nil:
-			track.Advisory = &regtypes.Advisory{
-				VulnIDs:  current.VulnIDs,
-				Severity: ceiling(current.Vulns),
-				Since:    now,
-			}
 		default:
-			// The advisory stands; its since date marks when it appeared.
-			track.Advisory.VulnIDs = current.VulnIDs
-			track.Advisory.Severity = ceiling(current.Vulns)
+			// since is the advisory's own publication date, never this
+			// pipeline's clock. It is what a consumer reads, and it arms
+			// auto-deprecation, so our clock deprecates a track early.
+			since := current.PublishedAt
+			if since.IsZero() {
+				since = now
+			}
+
+			track.Advisory = &regtypes.Advisory{
+				VulnIDs:         current.VulnIDs,
+				Severity:        ceiling(current.Vulns, current.VulnSeverities),
+				Since:           since,
+				FixedIn:         current.FixedIn,
+				AffectedImports: current.AffectedImports,
+			}
 		}
 	}
 
@@ -429,7 +435,28 @@ func (c *Controller) maintainWindows(
 	return track
 }
 
-func ceiling(v regtypes.Vector) regtypes.Severity {
+// ceiling names the worst severity among the findings.
+//
+// A vector counts an unpublished severity as high, which is the right call
+// for comparing two versions: it never trades a maybe-critical against a low.
+// It is the wrong call for a sentence a person reads, because "high" is a
+// claim the feed never made. So when every finding is unclassified, the
+// advisory says unknown - which is 38 percent of real records.
+func ceiling(v regtypes.Vector, published []regtypes.Severity) regtypes.Severity {
+	known := false
+
+	for _, s := range published {
+		if s != "" {
+			known = true
+
+			break
+		}
+	}
+
+	if !known && len(published) > 0 {
+		return regtypes.SeverityUnknown
+	}
+
 	switch {
 	case v.Critical > 0:
 		return regtypes.SeverityCritical

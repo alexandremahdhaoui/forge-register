@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-register/internal/types/regtypes"
 )
@@ -338,11 +339,12 @@ func (h *HTTP) queryBatch(ctx context.Context, queries []batchQuery) ([]batchRes
 
 // record is one OSV vulnerability, read whole.
 type record struct {
-	ID        string
-	Severity  regtypes.Severity
-	Withdrawn bool
-	Aliases   []string
-	Affected  []affected
+	ID          string
+	Severity    regtypes.Severity
+	Withdrawn   bool
+	Aliases     []string
+	PublishedAt time.Time
+	Affected    []affected
 }
 
 // affected is one affected block: a package, its ranges and its import scope.
@@ -461,6 +463,7 @@ func vulnOf(r record, a affected, why string) regtypes.Vuln {
 	return regtypes.Vuln{
 		ID:              r.ID,
 		Severity:        r.Severity,
+		PublishedAt:     r.PublishedAt,
 		Introduced:      sortedKeys(introduced),
 		FixedIn:         sortedKeys(fixed),
 		LastAffected:    sortedKeys(last),
@@ -546,6 +549,7 @@ func (h *HTTP) recordOf(ctx context.Context, id string, depth int) (record, erro
 	var body struct {
 		ID               string   `json:"id"`
 		Withdrawn        string   `json:"withdrawn"`
+		Published        string   `json:"published"`
 		Aliases          []string `json:"aliases"`
 		DatabaseSpecific struct {
 			Severity string `json:"severity"`
@@ -582,6 +586,12 @@ func (h *HTTP) recordOf(ctx context.Context, id string, depth int) (record, erro
 	}
 
 	out := record{ID: id, Withdrawn: body.Withdrawn != "", Aliases: body.Aliases}
+
+	// The advisory's own date, not ours. It is what a consumer reads and
+	// what arms auto-deprecation downstream.
+	if at, err := time.Parse(time.RFC3339, body.Published); err == nil {
+		out.PublishedAt = at
+	}
 
 	out.Severity = severityOfWord(body.DatabaseSpecific.Severity)
 

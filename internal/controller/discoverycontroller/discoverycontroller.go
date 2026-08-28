@@ -6,6 +6,8 @@ package discoverycontroller
 import (
 	"context"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/osvadapter"
 	"github.com/alexandremahdhaoui/forge-register/internal/adapter/registryadapter"
@@ -64,11 +66,52 @@ func (c *Controller) annotate(ctx context.Context, ecosystem, pkg string, candid
 		candidates[i].Outcome = answer.Outcome
 		candidates[i].Reason = answer.Reason
 		candidates[i].VulnIDs = nil
+		candidates[i].VulnSeverities = nil
+		candidates[i].FixedIn = nil
+		candidates[i].AffectedImports = nil
+		candidates[i].PublishedAt = time.Time{}
+
+		fixes := map[string]bool{}
+		imports := map[string]bool{}
 
 		for _, v := range answer.Vulns {
 			candidates[i].VulnIDs = append(candidates[i].VulnIDs, v.ID)
+			candidates[i].VulnSeverities = append(candidates[i].VulnSeverities, v.Severity)
+
+			for _, f := range v.FixedIn {
+				fixes[f] = true
+			}
+
+			for _, imp := range v.AffectedImports {
+				imports[imp] = true
+			}
+
+			// The oldest finding dates the advisory: it is how long this has
+			// been true, not how long we have known.
+			if !v.PublishedAt.IsZero() &&
+				(candidates[i].PublishedAt.IsZero() || v.PublishedAt.Before(candidates[i].PublishedAt)) {
+				candidates[i].PublishedAt = v.PublishedAt
+			}
 		}
+
+		candidates[i].FixedIn = sortedKeys(fixes)
+		candidates[i].AffectedImports = sortedKeys(imports)
 	}
 
 	return candidates, snapshot, nil
+}
+
+func sortedKeys(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+
+	sort.Strings(out)
+
+	return out
 }

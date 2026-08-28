@@ -493,3 +493,117 @@ func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 	require.NotNil(t, written.Deprecated)
 	require.Equal(t, regtypes.DeprecationStale, written.Deprecated.Reason)
 }
+
+// An advisory has to carry what a consumer needs to decide, and nothing it
+// did not check.
+//
+// forge-factory printed "no fix upstream" from a string constant on every
+// advisory it ever raised. Measured over 267 real OSV records a fixed version
+// exists in 99 percent of them, so that sentence was wrong almost every time.
+// The advisory now carries the fix, the import scope, and the date the feed
+// published rather than the date this pipeline happened to run.
+func TestAnAdvisoryCarriesTheFixTheScopeAndTheRealDate(t *testing.T) {
+	h := newHarness(t)
+
+	published := days(400)
+
+	track := regtypes.Track{Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "1.1.0"}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
+		Return([]regtypes.Candidate{{
+			Version: "1.1.0", ReleasedAt: days(500),
+			Vulns:           regtypes.Vector{High: 1},
+			VulnIDs:         []string{"GHSA-real"},
+			VulnSeverities:  []regtypes.Severity{regtypes.SeverityHigh},
+			Outcome:         regtypes.OutcomeFindings,
+			FixedIn:         []string{"1.2.0"},
+			AffectedImports: []string{"example.com/pkg/inner"},
+			PublishedAt:     published,
+		}}, "sha256:snap", nil).Once()
+
+	var written regtypes.Track
+
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	_, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+
+	require.NotNil(t, written.Advisory)
+	require.Equal(t, []string{"1.2.0"}, written.Advisory.FixedIn,
+		"upgrading is the best way out, so the version that fixes it has to travel")
+	require.Equal(t, []string{"example.com/pkg/inner"}, written.Advisory.AffectedImports)
+	require.Equal(t, published, written.Advisory.Since,
+		"the advisory's own date, not ours: this also arms auto-deprecation")
+	require.NotEqual(t, now, written.Advisory.Since)
+}
+
+// A finding the feed never classified says so. The severity vector counts an
+// unpublished severity as high, which is right when comparing two versions
+// and wrong in a sentence a person reads: "high" would be a claim the feed
+// never made. 38 percent of real records publish no severity anywhere.
+func TestAnUnclassifiedFindingSaysUnknownRatherThanHigh(t *testing.T) {
+	h := newHarness(t)
+
+	track := regtypes.Track{Package: "golang.org/x/crypto", Ecosystem: "go", Prefix: "0", Current: "v0.55.0"}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "go", "golang.org/x/crypto").
+		Return([]regtypes.Candidate{{
+			Version: "v0.55.0", ReleasedAt: days(10),
+			Vulns:          regtypes.Vector{High: 1},
+			VulnIDs:        []string{"GO-2026-5932"},
+			VulnSeverities: []regtypes.Severity{""},
+			Outcome:        regtypes.OutcomeFindings,
+			PublishedAt:    days(20),
+		}}, "sha256:snap", nil).Once()
+
+	var written regtypes.Track
+
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	_, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+
+	require.NotNil(t, written.Advisory)
+	require.Equal(t, regtypes.SeverityUnknown, written.Advisory.Severity)
+	require.Empty(t, written.Advisory.FixedIn,
+		"GO-2026-5932 has no fix and never will: the package is unmaintained by design")
+}
+
+// Nothing measured, nothing asserted. An advisory raised on an absence of
+// knowledge is a guess with a severity attached to it.
+func TestAnUnmeasuredVersionRaisesNoAdvisory(t *testing.T) {
+	for _, outcome := range []regtypes.Outcome{regtypes.OutcomeNotFound, regtypes.OutcomeUnreachable} {
+		t.Run(string(outcome), func(t *testing.T) {
+			h := newHarness(t)
+
+			track := regtypes.Track{Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "1.1.0"}
+
+			h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+			h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
+				Return([]regtypes.Candidate{{
+					Version: "1.1.0", ReleasedAt: days(10),
+					Outcome: outcome, Reason: "nothing was measured",
+				}}, "sha256:snap", nil).Once()
+
+			var written regtypes.Track
+
+			h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+			h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+			_, err := h.c.Evaluate(context.Background(), now)
+			require.NoError(t, err)
+
+			require.Nil(t, written.Advisory)
+			require.Equal(t, outcome, written.Outcome,
+				"the file has to say which kind of nothing this was")
+			require.Equal(t, "nothing was measured", written.Reason)
+		})
+	}
+}

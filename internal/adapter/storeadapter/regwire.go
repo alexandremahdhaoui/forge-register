@@ -33,9 +33,11 @@ func trackToWire(t regtypes.Track) spec.Track {
 
 	if t.Advisory != nil {
 		wire.Advisory = &spec.Advisory{
-			VulnIds:  t.Advisory.VulnIDs,
-			Severity: spec.AdvisorySeverity(t.Advisory.Severity),
-			Since:    t.Advisory.Since,
+			VulnIds:         t.Advisory.VulnIDs,
+			Severity:        spec.AdvisorySeverity(t.Advisory.Severity),
+			Since:           t.Advisory.Since,
+			FixedIn:         orNilSlice(t.Advisory.FixedIn),
+			AffectedImports: orNilSlice(t.Advisory.AffectedImports),
 		}
 	}
 
@@ -94,9 +96,11 @@ func trackFromWire(payload []byte) (regtypes.Track, error) {
 
 	if wire.Advisory != nil {
 		track.Advisory = &regtypes.Advisory{
-			VulnIDs:  wire.Advisory.VulnIds,
-			Severity: regtypes.Severity(wire.Advisory.Severity),
-			Since:    wire.Advisory.Since,
+			VulnIDs:         wire.Advisory.VulnIds,
+			Severity:        regtypes.Severity(wire.Advisory.Severity),
+			Since:           wire.Advisory.Since,
+			FixedIn:         orEmptySlice(wire.Advisory.FixedIn),
+			AffectedImports: orEmptySlice(wire.Advisory.AffectedImports),
 		}
 	}
 
@@ -239,4 +243,22 @@ func orEmptyString(s *string) string {
 	}
 
 	return *s
+}
+
+// orNilSlice keeps an empty list out of the file. A key present and empty and
+// a key absent say the same thing here, and one of them is quieter.
+func orNilSlice(in []string) *[]string {
+	if len(in) == 0 {
+		return nil
+	}
+
+	return &in
+}
+
+func orEmptySlice(in *[]string) []string {
+	if in == nil {
+		return nil
+	}
+
+	return *in
 }

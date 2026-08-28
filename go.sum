@@ -1,5 +1,5 @@
-github.com/alexandremahdhaoui/forge-register-spec v0.1.1-0.20260828122901-2e35d5c4e278 h1:L/KATq9aj2ciMdHB/WLM6rUBcaqmT8LF63jIsr2rOSA=
-github.com/alexandremahdhaoui/forge-register-spec v0.1.1-0.20260828122901-2e35d5c4e278/go.mod h1:Tbe1av9fmaOf+t5j+ptdMXFdF5tdxkIxuGvPkfNnmWI=
+github.com/alexandremahdhaoui/forge-register-spec v0.1.1-0.20260828125816-8f1ea3027a9a h1:F62BCJPCUx/xgQTKib1N188vZjkSyklfkrDkwO5UqyQ=
+github.com/alexandremahdhaoui/forge-register-spec v0.1.1-0.20260828125816-8f1ea3027a9a/go.mod h1:Tbe1av9fmaOf+t5j+ptdMXFdF5tdxkIxuGvPkfNnmWI=
 github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63YCY=
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

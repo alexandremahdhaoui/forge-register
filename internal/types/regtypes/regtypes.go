@@ -105,6 +105,11 @@ type Vuln struct {
 	// the feed's own words, so a human can check the reasoning instead of
 	// trusting it.
 	MatchedRange string
+
+	// PublishedAt is when the advisory was published upstream. It dates the
+	// advisory a consumer sees, and it arms auto-deprecation, so taking the
+	// pipeline's own clock instead deprecates a track early.
+	PublishedAt time.Time
 }
 
 // Outcome says what actually happened when the feed was asked about one
@@ -175,15 +180,45 @@ type Candidate struct {
 	// the feed to the file. A zero vector means nothing on its own.
 	Outcome Outcome
 	Reason  string
+
+	// What a consumer needs in order to decide, carried from the records
+	// rather than asserted downstream. FixedIn empty means the feed names no
+	// fix; AffectedImports empty means it publishes no scope, which is not
+	// the same as everything being in scope.
+	FixedIn         []string
+	AffectedImports []string
+
+	// VulnSeverities is what the feed published per finding, empty string
+	// included. The vector counts an unpublished severity as high, which is
+	// right for comparing versions and wrong for a sentence a person reads.
+	VulnSeverities []Severity
+
+	// PublishedAt is the earliest publication date among the findings. It
+	// dates the advisory, and it is what arms auto-deprecation - so using
+	// the pipeline's own clock deprecates a track early.
+	PublishedAt time.Time
 }
 
-// Advisory marks a current version carrying a vulnerability with no fixed
-// version upstream. An advisory pierces every pin.
+// Advisory marks a current version carrying a vulnerability. It pierces every
+// pin, and is cleared only by acknowledging the named ids in the consumer's
+// own factory file.
+//
+// It carries what a consumer needs to decide. Without FixedIn, forge-factory
+// printed "no fix upstream" from a string constant on every advisory, having
+// never read a range event.
 type Advisory struct {
 	VulnIDs  []string
 	Severity Severity
 	Since    time.Time
+
+	FixedIn         []string
+	AffectedImports []string
 }
+
+// SeverityUnknown is what the feed publishes for 38 percent of real records:
+// nothing. Naming it beats inventing a number, and beats silently counting it
+// as high in a field a human reads.
+const SeverityUnknown Severity = "unknown"
 
 // Deprecation is set by policy, never by hand.
 type Deprecation struct {
