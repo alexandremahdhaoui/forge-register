@@ -99,24 +99,28 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 	return report, nil
 }
 
-// candidatesFor answers what the upgrade policy weighs. Registry
-// ecosystems discover; internal tracks have no feed and no registry -
-// versions enter only through the publish proof door - so the published
-// history IS the candidate list, and only the vulnerability vectors are
-// asked fresh. That refresh is what raises an advisory on a toolchain
-// version the world learned something about, and what lets a published
-// fix advance a track the moment its vector improves.
+// candidatesFor answers what the upgrade policy weighs. Registry ecosystems
+// discover; internal tracks have no feed and no registry - versions enter
+// only through the publish proof door - so the track's own current version
+// is the candidate, and only its vulnerability vector is asked fresh. That
+// refresh is what raises an advisory on a toolchain version the world
+// learned something about.
+//
+// Older published versions are not candidates. Publish only ever moves
+// current forward, so nothing behind it was ever adoptable, and reaching
+// back through a history array to re-offer them was weighing versions the
+// policy would refuse anyway.
 func (c *Controller) candidatesFor(ctx context.Context, track regtypes.Track) ([]regtypes.Candidate, string, error) {
 	if track.Ecosystem != "internal" {
 		return c.discovery.Discover(ctx, track.Ecosystem, track.Package)
 	}
 
-	published := make([]regtypes.Candidate, 0, len(track.History))
-	for _, entry := range track.History {
+	published := []regtypes.Candidate{}
+	if track.Current != "" {
 		published = append(published, regtypes.Candidate{
-			Version:    entry.Version,
-			ReleasedAt: entry.ReleasedAt,
-			Vulns:      entry.Vulns,
+			Version:    track.Current,
+			ReleasedAt: track.ReleasedAt,
+			Vulns:      track.Vulns,
 		})
 	}
 
@@ -280,10 +284,10 @@ func (c *Controller) Publish(ctx context.Context, ecosystem, pkg, version, sourc
 	if track.Current == "" || compareNumeric(version, track.Current) > 0 {
 		track.Current = version
 		track.UpdatedAt = now
-		track.History = append(track.History, regtypes.Entry{
-			Version: version, ReleasedAt: now, AdoptedAt: now,
-			Source: source, Provenance: provenance,
-		})
+		track.ReleasedAt = now
+		track.AdoptedAt = now
+		track.Source = source
+		track.Provenance = provenance
 
 		if err := c.store.PutTrack(ctx, track); err != nil {
 			return KeyedVerdict{}, fmt.Errorf("publishing %s: %w", pkg, err)
@@ -302,25 +306,33 @@ func (c *Controller) Publish(ctx context.Context, ecosystem, pkg, version, sourc
 	return KeyedVerdict{Key: key, Verdict: verdict}, nil
 }
 
-// advance appends the adopted version to the track's history and moves
-// current.
+// advance moves the track to the adopted version and records what was
+// measured about it. The previous version is not kept here: the commit this
+// write becomes is the record of what the track used to say.
 func (c *Controller) advance(_ context.Context, track regtypes.Track, version string, candidates []regtypes.Candidate, snapshot, provenance string, now time.Time) (regtypes.Track, error) {
-	entry := regtypes.Entry{
-		Version: version, AdoptedAt: now, OSVSnapshot: snapshot, Provenance: provenance,
-	}
+	track.Current = version
+	track.UpdatedAt = now
+	track.AdoptedAt = now
+	track.OSVSnapshot = snapshot
+	track.Provenance = provenance
+
+	// A version we adopted without a candidate behind it has no measurement,
+	// and saying so is the point.
+	track.Outcome = regtypes.OutcomeUnreachable
+	track.Reason = "adopted without a candidate measurement"
+	track.Vulns = regtypes.Vector{}
+	track.ReleasedAt = time.Time{}
 
 	for _, cand := range candidates {
 		if cand.Version == version {
-			entry.ReleasedAt = cand.ReleasedAt
-			entry.Vulns = cand.Vulns
+			track.ReleasedAt = cand.ReleasedAt
+			track.Vulns = cand.Vulns
+			track.Outcome = cand.Outcome
+			track.Reason = cand.Reason
 
 			break
 		}
 	}
-
-	track.Current = version
-	track.UpdatedAt = now
-	track.History = append(track.History, entry)
 
 	return track, nil
 }
@@ -354,6 +366,22 @@ func (c *Controller) maintain(track regtypes.Track, candidates []regtypes.Candid
 	}
 
 	if current != nil {
+		// Whatever else changes, the track records what the feed said about
+		// the version it is on, and why. An evaluate that finds nothing has
+		// to leave behind a record that says which kind of nothing it was.
+		track.Vulns = current.Vulns
+		track.Outcome = current.Outcome
+		track.Reason = current.Reason
+
+		if !(regtypes.Answer{Outcome: current.Outcome}).Measured() {
+			// Nothing was measured, so nothing is asserted. An advisory
+			// raised on an absence of knowledge is a guess with a severity
+			// attached to it.
+			track.Advisory = nil
+
+			return c.maintainWindows(track, hasSuccessor, lastRelease, now)
+		}
+
 		fixExists := false
 
 		for _, cand := range candidates {
@@ -382,6 +410,14 @@ func (c *Controller) maintain(track regtypes.Track, candidates []regtypes.Candid
 		}
 	}
 
+	return c.maintainWindows(track, hasSuccessor, lastRelease, now)
+}
+
+// maintainWindows applies the deprecation and quiet windows, which depend on
+// release dates rather than on anything the vulnerability feed said.
+func (c *Controller) maintainWindows(
+	track regtypes.Track, hasSuccessor bool, lastRelease, now time.Time,
+) regtypes.Track {
 	track.Deprecated = policycontroller.EvaluateDeprecation(policycontroller.DeprecationInput{
 		Track: track, HasSuccessor: hasSuccessor, LastReleaseInPrefix: lastRelease,
 	}, now, c.params)

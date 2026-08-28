@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -64,6 +65,12 @@ type upstream struct {
 	versions []map[string]any
 	vulns    map[string][]string // version -> vuln ids
 	severity map[string]string   // vuln id -> severity
+
+	// The package the feed is answering about. A record has to name it, the
+	// same way a real one does, or the register cannot tell which of a
+	// record's affected blocks applies to it.
+	pkg       string
+	ecosystem string
 }
 
 func (u *upstream) release(version, createdAt string) {
@@ -90,12 +97,20 @@ func (u *upstream) serve(t *testing.T) string {
 		_ = json.NewEncoder(w).Encode(map[string]any{"versions": u.versions})
 	})
 
+	// The feed answers the way api.osv.dev really does. A package-wide query
+	// carries no version and returns every id the feed holds for the package;
+	// a version-filtered query is the feed's own opinion, which the register
+	// treats as a hint and checks against the published ranges itself.
 	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, r *http.Request) {
 		u.mu.Lock()
 		defer u.mu.Unlock()
 
 		var in struct {
 			Queries []struct {
+				Package struct {
+					Name      string `json:"name"`
+					Ecosystem string `json:"ecosystem"`
+				} `json:"package"`
 				Version string `json:"version"`
 			} `json:"queries"`
 		}
@@ -106,8 +121,27 @@ func (u *upstream) serve(t *testing.T) string {
 
 		for _, q := range in.Queries {
 			ids := []map[string]any{}
-			for _, id := range u.vulns[q.Version] {
-				ids = append(ids, map[string]any{"id": id})
+
+			if q.Version == "" {
+				seen := map[string]bool{}
+
+				for _, list := range u.vulns {
+					for _, id := range list {
+						if !seen[id] {
+							seen[id] = true
+
+							ids = append(ids, map[string]any{"id": id})
+						}
+					}
+				}
+
+				sort.Slice(ids, func(i, j int) bool {
+					return ids[i]["id"].(string) < ids[j]["id"].(string)
+				})
+			} else {
+				for _, id := range u.vulns[q.Version] {
+					ids = append(ids, map[string]any{"id": id})
+				}
 			}
 
 			results = append(results, map[string]any{"vulns": ids})
@@ -116,13 +150,33 @@ func (u *upstream) serve(t *testing.T) string {
 		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
 	})
 
+	// A record names the versions it affects explicitly, which is one of the
+	// two shapes OSV publishes and the one a small fixture can state exactly.
 	mux.HandleFunc("/v1/vulns/", func(w http.ResponseWriter, r *http.Request) {
 		u.mu.Lock()
 		defer u.mu.Unlock()
 
 		id := strings.TrimPrefix(r.URL.Path, "/v1/vulns/")
+
+		affectedVersions := []string{}
+
+		for version, list := range u.vulns {
+			for _, got := range list {
+				if got == id {
+					affectedVersions = append(affectedVersions, version)
+				}
+			}
+		}
+
+		sort.Strings(affectedVersions)
+
 		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":                id,
 			"database_specific": map[string]any{"severity": u.severity[id]},
+			"affected": []map[string]any{{
+				"package":  map[string]any{"name": u.pkg, "ecosystem": u.ecosystem},
+				"versions": affectedVersions,
+			}},
 		})
 	})
 
@@ -206,7 +260,10 @@ func gitLog(t *testing.T, dir string) string {
 }
 
 func TestTheWholeLoop(t *testing.T) {
-	up := &upstream{vulns: map[string][]string{}, severity: map[string]string{}}
+	up := &upstream{
+		vulns: map[string][]string{}, severity: map[string]string{},
+		pkg: "example-crate", ecosystem: "crates.io",
+	}
 	up.release("1.0.0", "2026-01-01T00:00:00Z")
 
 	reg := newInstance(t, up.serve(t))
@@ -274,7 +331,10 @@ func TestTheWholeLoop(t *testing.T) {
 }
 
 func TestARejectionExplainsItself(t *testing.T) {
-	up := &upstream{vulns: map[string][]string{}, severity: map[string]string{}}
+	up := &upstream{
+		vulns: map[string][]string{}, severity: map[string]string{},
+		pkg: "example-crate", ecosystem: "crates.io",
+	}
 	up.release("2.0.0", "2026-01-01T00:00:00Z")
 	up.disclose("2.0.0", "CVE-2026-9999", "CRITICAL")
 
@@ -296,7 +356,10 @@ func TestARejectionExplainsItself(t *testing.T) {
 }
 
 func TestPublishIsTheProofDoor(t *testing.T) {
-	up := &upstream{vulns: map[string][]string{}, severity: map[string]string{}}
+	up := &upstream{
+		vulns: map[string][]string{}, severity: map[string]string{},
+		pkg: "example-crate", ecosystem: "crates.io",
+	}
 	reg := newInstance(t, up.serve(t))
 
 	out, err := reg.forgeRegister(t, "publish", "--provenance", "213ecaf37e78",

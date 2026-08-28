@@ -1,115 +1,5504 @@
 {
-  "_comment": [
-    "What the register's OSV parser MUST extract from each record in",
-    "osv-records.json. These are assertions, stated by hand, not computed",
-    "from the records - a fixture that derives its own expectations proves",
-    "nothing, because the same bug would produce both sides.",
-    "",
-    "Keys match the ids in osv-records.json exactly.",
-    "",
-    "Fields today's parser does not read at all:",
-    "  fixed            from affected[].ranges[].events[].fixed",
-    "  introduced       from affected[].ranges[].events[].introduced",
-    "  affectedImports  from affected[].ecosystem_specific.imports[].path",
-    "",
-    "Field today's parser does read:",
-    "  severity         from database_specific.severity",
-    "",
-    "severity null means OSV published none. By the rule recorded in",
-    "FOLLOWUP.md line 186 dated 2026-08-20, unknown counts as high. That is a",
-    "decision, not a defect. It is stated here so a test pins the decision",
-    "rather than rediscovering it.",
-    "",
-    "Rationale lives in advisory-gate-findings.md."
-  ],
-
-  "expected": {
-    "GO-2026-5932": {
-      "severity": null,
-      "introduced": ["0"],
-      "fixed": [],
-      "fixExists": false,
-      "affectedImports": [
-        "golang.org/x/crypto/openpgp",
-        "golang.org/x/crypto/openpgp/armor",
-        "golang.org/x/crypto/openpgp/clearsign",
-        "golang.org/x/crypto/openpgp/elgamal",
-        "golang.org/x/crypto/openpgp/errors",
-        "golang.org/x/crypto/openpgp/packet",
-        "golang.org/x/crypto/openpgp/s2k"
-      ],
-      "hasImportScope": true
-    },
-
-    "RUSTSEC-2022-0040": {
-      "severity": null,
-      "introduced": ["0.0.0-0"],
-      "fixed": [],
-      "fixExists": false,
-      "affectedImports": [],
-      "hasImportScope": false
-    },
-
-    "GHSA-29mw-wpgm-hmr9": {
-      "severity": "MODERATE",
-      "introduced": ["4.0.0"],
-      "fixed": ["4.17.21"],
-      "fixExists": true,
-      "affectedImports": [],
-      "hasImportScope": false
-    },
-
-    "GHSA-9wx4-h78v-vm56": {
-      "severity": "MODERATE",
-      "introduced": ["0"],
-      "fixed": ["2.32.0"],
-      "fixExists": true,
-      "affectedImports": [],
-      "hasImportScope": false
-    },
-
-    "GHSA-4v7x-pqxf-cx7m": {
-      "severity": "MODERATE",
-      "introduced": ["0", "1.22.0-0"],
-      "fixed": ["0.23.0", "1.21.9", "1.22.2"],
-      "fixExists": true,
-      "affectedImports": [],
-      "hasImportScope": false
-    }
+ "_comment": [
+  "Expectations, stated separately from the input in osv-records.json.",
+  "",
+  "These were produced by a second implementation of the same OSV rules,",
+  "written in Python from the schema rather than from the Go code, and spot",
+  "checked by hand. Two independent readings of the same bytes have to agree.",
+  "A fixture that computes its expectation with the code under test proves",
+  "only that the code agrees with itself.",
+  "",
+  "parse: what reading one record whole must produce. severity is the three",
+  "step chain - the database's own word, then a CVSS v3 vector, then the",
+  "records this one is an alias of. An empty string means the feed genuinely",
+  "publishes no severity anywhere, which is true of 19 of these 267 records.",
+  "CVSS v4 is deliberately not scored: its base score is a lookup table, not a",
+  "formula, and inventing a number is worse than admitting we have none.",
+  "",
+  "match: what the range walk must answer at the versions golden-register is",
+  "actually on. One finding exists across the whole workspace and it is",
+  "GO-2026-5932 on golang.org/x/crypto. 39 packages are not-found: the feed",
+  "carries no record for them at all, which is NOT the same claim as clean and",
+  "is exactly the distinction every index file used to lose.",
+  "",
+  "probes: for each record, one version its own published range covers, and the",
+  "package it belongs to. A record commonly carries several maintenance branches",
+  "- tokio's ranges are 0.2.0-1.18.5, 1.19.0-1.20.4 and 1.21.0-1.24.2 - and the",
+  "fix that applies depends on which branch you are on. So the expectation is",
+  "stated against a named version rather than the record as a whole.",
+  "severitySource names which step of the chain answered: word, cvss, alias,",
+  "or empty when the feed publishes no severity anywhere. Stating it here is",
+  "what lets a test prove the cvss step earns its place instead of matching on",
+  "the shape of pretty printed JSON, which is how it went unguarded.",
+  "errors: the status codes and bodies the API really produces, and what each",
+  "must become. Note that a package the feed has never heard of answers 200",
+  "with the body {} - byte identical to a package with no vulnerabilities."
+ ],
+ "parse": {
+  "GHSA-247c-9743-5963": {
+   "severity": "high",
+   "introduced": [
+    "5.3.2"
+   ],
+   "fixed": [
+    "5.8.5"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
   },
-
-  "expectedQueries": {
-    "golang.org/x/crypto@0.55.0": {
-      "vulnIds": ["GO-2026-5932"],
-      "note": "One advisory. No version clears it, so the track has no upgrade target."
-    },
-    "github.com/spf13/cobra@1.10.2": {
-      "vulnIds": [],
-      "note": "Genuinely clean. Must be distinguishable from the stub's empty answer, whose digest e3b0c44298fc1c14 is the sha256 of empty input and appears in 521 of 533 golden-register verdicts."
-    }
+  "GHSA-29mw-wpgm-hmr9": {
+   "severity": "medium",
+   "introduced": [
+    "4.0.0"
+   ],
+   "fixed": [
+    "4.17.21"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
   },
-
-  "gateOutcomes": {
-    "_comment": [
-      "What the gate should DO with each, given the workspace imports only",
-      "golang.org/x/crypto/nacl/box and nothing from openpgp.",
-      "These are the cases the current gate gets wrong or cannot express."
-    ],
-    "GO-2026-5932": {
-      "currentBehaviour": "blocks resolution permanently",
-      "correctBehaviour": "not applicable: no affected import path is reached",
-      "clearedBy": "reachability"
-    },
-    "RUSTSEC-2022-0040": {
-      "currentBehaviour": "blocks resolution permanently",
-      "correctBehaviour": "unresolvable by reachability: crates.io publishes no import scope",
-      "clearedBy": "an auditable waiver only",
-      "note": "This case is why a waiver is mandatory rather than optional. Import scoping is a Go-only remedy."
-    },
-    "GHSA-29mw-wpgm-hmr9": {
-      "currentBehaviour": "raises a standing advisory",
-      "correctBehaviour": "advance the track to the fixed version",
-      "clearedBy": "reading the fixed event"
-    }
+  "GHSA-2grh-hm3w-w7hv": {
+   "severity": "medium",
+   "introduced": [
+    "1.8.0"
+   ],
+   "fixed": [
+    "1.8.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-2wp2-chmh-r934": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20180925071336-cf3bd585ca2a"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-2wrh-6pvc-2jm9": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.13.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-3358-4f7f-p4j4": {
+   "severity": "high",
+   "introduced": [
+    "0.13.0"
+   ],
+   "fixed": [
+    "0.13.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-33c7-2mpw-hg34": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.11.7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-34p9-f4q3-c4r7": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.9.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-35jh-r3h4-6jhm": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "4.17.21"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-386q-5hp3-95m9": {
+   "severity": "high",
+   "introduced": [
+    "0.17.0"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-39qc-96h7-956f": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190813141303-74dc4d7220e7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-3fjj-p79j-c9hh": {
+   "severity": "medium",
+   "introduced": [
+    "4.0.0"
+   ],
+   "fixed": [
+    "4.10.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-3gxf-9r58-2ghg": {
+   "severity": "medium",
+   "introduced": [
+    "0.9.7"
+   ],
+   "fixed": [
+    "0.10.48"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-3vm4-22fp-5rfm": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20201216223049-8b5274cf687f"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-4374-p667-p6c8": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.17.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-43w2-9j62-hq99": {
+   "severity": "critical",
+   "introduced": [
+    "0.6.3"
+   ],
+   "fixed": [
+    "0.6.14"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-442q-2j6p-642g": {
+   "severity": "high",
+   "introduced": [
+    "0.59.0"
+   ],
+   "fixed": [
+    "0.62.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-444r-cwp2-x5xf": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "5.8.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-455w-c45v-86rg": {
+   "severity": "high",
+   "introduced": [
+    "4.0.0"
+   ],
+   "fixed": [
+    "4.8.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-45gg-vh54-h5m9": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-45x7-px36-x8w8": {
+   "severity": "medium",
+   "introduced": [
+    "0.1.0"
+   ],
+   "fixed": [
+    "0.17.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-4fcv-w3qc-ppgg": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.39"
+   ],
+   "fixed": [
+    "0.10.72"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-4q83-7cq4-p6wg": {
+   "severity": "low",
+   "introduced": [
+    "1.21.0"
+   ],
+   "fixed": [
+    "1.24.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-4r78-hx75-jjj2": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190125002852-4b62a64f59f7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-4v7x-pqxf-cx7m": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.23.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-4xc9-xhrj-v574": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "4.17.11"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-5578-w22f-pfx9": {
+   "severity": "high",
+   "introduced": [
+    "0.11.6"
+   ],
+   "fixed": [
+    "0.64.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-55m5-whcv-c49c": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.6.13"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-573f-x89g-hqp9": {
+   "severity": "medium",
+   "introduced": [
+    "5.7.2"
+   ],
+   "fixed": [
+    "5.8.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-5cgq-3rg8-m6cv": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-5cv4-jp36-h3mw": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-5p4h-3377-7w67": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20180816102801-aaf60122140d"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-5xrq-8626-4rwp": {
+   "severity": "critical",
+   "introduced": [
+    "4.0.0"
+   ],
+   "fixed": [
+    "4.1.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-652x-xj99-gmcc": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.3.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-66p5-j55p-32r9": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.6.13"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-67hx-6x53-jw92": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "7.23.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-69cg-p879-7622": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20220906165146-f3363e06e74c"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-69gw-hgj3-45m7": {
+   "severity": "critical",
+   "introduced": [
+    "0.6.3"
+   ],
+   "fixed": [
+    "0.6.10"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-6hcf-g6gr-hhcr": {
+   "severity": "high",
+   "introduced": [
+    "0.9.7"
+   ],
+   "fixed": [
+    "0.10.48"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-6w46-j5rx-g56g": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "9.0.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-78mq-xcr3-xm33": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-7fhm-mqm4-2wp7": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.2.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": "word"
+  },
+  "GHSA-7rrj-xr53-82p7": {
+   "severity": "medium",
+   "introduced": [
+    "1.7.0"
+   ],
+   "fixed": [
+    "1.18.4"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-7wgr-7666-7pwj": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.5.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-8359-h9fx-j6v9": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.62.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-83g2-8m93-v3w7": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20210520170846-37e1c6afe023"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-89gr-r52h-f8rx": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-89xv-2j6f-qhc8": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.4.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-8c26-wmh5-6g9v": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20220314234659-1baeb1ce4c0b"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-8c75-8mhr-p7r9": {
+   "severity": "high",
+   "introduced": [
+    "0.10.24"
+   ],
+   "fixed": [
+    "0.10.78"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-8h2j-cgx8-6xv7": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.65.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-8m8r-38jm-f355": {
+   "severity": "high",
+   "introduced": [
+    "0.52.1"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-954p-556p-r752": {
+   "severity": "high",
+   "introduced": [
+    "0.9.1"
+   ],
+   "fixed": [
+    "0.61.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-9crc-q9x8-hgqq": {
+   "severity": "critical",
+   "introduced": [
+    "1.0.0"
+   ],
+   "fixed": [
+    "1.6.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-9hjg-9r4m-mvj7": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.32.4"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-9m57-25v3-79x9": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-9qwg-crg9-m2vc": {
+   "severity": "high",
+   "introduced": [
+    "0.9.7"
+   ],
+   "fixed": [
+    "0.10.48"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-9wx4-h78v-vm56": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.32.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-9x4c-63pf-525f": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.5.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-c3h9-896r-86jm": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.3.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-cfj3-7x9c-4p3h": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.3.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-cjjc-xp8v-855w": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20200124225646-8b5121be2f68"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-cqpr-pcm7-m3jc": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.4.20"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": "word"
+  },
+  "GHSA-f23m-r3pf-42rh": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "4.18.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-f5wc-c3c7-36mc": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-f6x5-jh6r-wrfv": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.45.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-f97h-2pfx-f59f": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.11.7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-fcf9-6fv2-fc5v": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20180921000356-2f5d2388922f"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-ffhg-7mh4-33c4": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20200220183623-bac4c82f6975"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-fg7r-2g4j-5cgr": {
+   "severity": "high",
+   "introduced": [
+    "0.1.14"
+   ],
+   "fixed": [
+    "1.8.4"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-fvqr-27wr-82fm": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "4.17.5"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-fxg5-wq6x-vr4w": {
+   "severity": "high",
+   "introduced": [
+    "0.0.0-20220524220425-1d687d428aca"
+   ],
+   "fixed": [
+    "0.1.1-0.20221104162952-702349b0e862"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-gc5v-m9x4-r6x2": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.33.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-ghm9-cr32-g9qj": {
+   "severity": "high",
+   "introduced": [
+    "0.10.39"
+   ],
+   "fixed": [
+    "0.10.78"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-gw89-822v-8v8g": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.0"
+   ],
+   "fixed": [
+    "0.10.55"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": "word"
+  },
+  "GHSA-gwc9-m7rh-j2ww": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20211202192323-5770296d904e"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-h86h-8ppg-mxmh": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20210428140749-89ef3d95e781"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-h8pj-cxx2-jfg2": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.23.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-hcg3-q754-cr77": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.35.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-hgr8-6h9x-f7q9": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190813141303-74dc4d7220e7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-hhx9-57xq-r5rw": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.97.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-hppc-g8h3-xhp3": {
+   "severity": "high",
+   "introduced": [
+    "0.9.24"
+   ],
+   "fixed": [
+    "0.10.78"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-j5w8-q4qc-rx2x": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.45.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-j884-q54q-mmx3": {
+   "severity": "high",
+   "introduced": [
+    "0.25.0"
+   ],
+   "fixed": [
+    "0.60.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-j8r2-6x86-q33q": {
+   "severity": "medium",
+   "introduced": [
+    "2.3.0"
+   ],
+   "fixed": [
+    "2.31.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-jcgq-xh2f-2hfm": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "4.18.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": "word"
+  },
+  "GHSA-jf85-cpcp-j695": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "4.17.12"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-jppx-rxg9-jmrx": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-jx2c-rxcm-jvmq": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "5.7.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-m34r-v34r-rf9q": {
+   "severity": "high",
+   "introduced": [
+    "0.51.0"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-mg2h-6x62-wpwc": {
+   "severity": "high",
+   "introduced": [
+    "5.0.0"
+   ],
+   "fixed": [
+    "5.3.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-mh6f-8j2x-4483": {
+   "severity": "critical",
+   "introduced": [
+    "3.3.6"
+   ],
+   "fixed": [
+    "4.0.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-mm7v-vpv8-xfc3": {
+   "severity": "critical",
+   "introduced": [
+    "0.6.5"
+   ],
+   "fixed": [
+    "0.6.10"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-mq6c-fh97-4gwv": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.38.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-mrq3-vjjr-p77c": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "5.7.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-mv93-wvcp-7m7r": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190125002852-4b62a64f59f7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-p5wg-g6qr-c7cg": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "9.26.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": "word"
+  },
+  "GHSA-p6mc-m468-83gw": {
+   "severity": "high",
+   "introduced": [
+    "3.7.0"
+   ],
+   "fixed": [
+    "4.17.19"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-pg2w-x9wp-vw92": {
+   "severity": "medium",
+   "introduced": [
+    "2.1.0"
+   ],
+   "fixed": [
+    "2.6.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-phqj-4mhp-q6mq": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.50"
+   ],
+   "fixed": [
+    "0.10.80"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-pqf5-4pqq-29f5": {
+   "severity": "high",
+   "introduced": [
+    "0.9.27"
+   ],
+   "fixed": [
+    "0.10.78"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-q382-vc8q-7jhj": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.4.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-q445-7m23-qrmw": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.10.66"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-q4h4-gmj2-qvw2": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-qf9m-vfgh-m389": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.109.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": "word"
+  },
+  "GHSA-qppj-fm5r-hxr3": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.17.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-qpw4-5x99-6vjp": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-qxp5-gwg8-xv66": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.36.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-r5c5-pr8j-pfp7": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190320223903-b7391e95e576"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-r5fr-rjxr-66jc": {
+   "severity": "high",
+   "introduced": [
+    "4.0.0"
+   ],
+   "fixed": [
+    "4.18.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-r5vv-ff45-prp2": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.63.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-r6v5-fh4h-64xc": {
+   "severity": "medium",
+   "introduced": [
+    "0.3.6"
+   ],
+   "fixed": [
+    "0.3.47"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-rfr2-mq9m-x2qx": {
+   "severity": "high",
+   "introduced": [
+    "0.9.1"
+   ],
+   "fixed": [
+    "0.61.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-rjwr-m7qx-3fjr": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.7.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-rm3j-f69w-wqmq": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-rpmj-rpgj-qmpm": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.0"
+   ],
+   "fixed": [
+    "0.10.70"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-rr8g-9fpq-6wmg": {
+   "severity": "low",
+   "introduced": [
+    "1.44.0"
+   ],
+   "fixed": [
+    "1.44.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-rxr4-x558-x7hw": {
+   "severity": "critical",
+   "introduced": [
+    "0.3.2"
+   ],
+   "fixed": [
+    "0.6.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-v778-237x-gjrc": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.31.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-vfw5-hrgq-h5wf": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190125091013-d26f9f9a57f3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-vgwf-h737-ff37": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-vh95-rmgr-6w4m": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.2.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-vvgc-356p-c3xw": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.38.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-vvpx-j8f3-3w6h": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.7.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-vx7x-vcc2-c44g": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.63.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-w879-237q-wc7r": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-wcg3-cvx6-7396": {
+   "severity": "medium",
+   "introduced": [
+    "0.1.0"
+   ],
+   "fixed": [
+    "0.2.23"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-wjv6-jcfj-mf9r": {
+   "severity": "high",
+   "introduced": [
+    "0.14.1"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-wvj2-96wp-fq3f": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.3.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-x3jr-pf6g-c48f": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190424203555-c05e17bb3b2d"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-x527-x647-q7gg": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-x5rq-j2xg-h7qm": {
+   "severity": "medium",
+   "introduced": [
+    "4.7.0"
+   ],
+   "fixed": [
+    "4.17.11"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-x67x-vg9m-65c3": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.5.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-x84v-xcm2-53pg": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.20.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xcf7-rvmh-g6q4": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.0"
+   ],
+   "fixed": [
+    "0.10.55"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xhjq-w7xm-p8qj": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20170330155735-e4e2799dd7aa"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xjxc-vfw2-cg96": {
+   "severity": "critical",
+   "introduced": [
+    "0.10.8"
+   ],
+   "fixed": [
+    "0.10.9"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xmgf-hq76-4vx2": {
+   "severity": "low",
+   "introduced": [
+    "0.9.0"
+   ],
+   "fixed": [
+    "0.10.78"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xp3w-r5p5-63rr": {
+   "severity": "high",
+   "introduced": [
+    "0.9.7"
+   ],
+   "fixed": [
+    "0.10.79"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xphf-cx8h-7q9g": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.29"
+   ],
+   "fixed": [
+    "0.10.60"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xrjj-mj9h-534m": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.4.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xv59-967r-8726": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.0"
+   ],
+   "fixed": [
+    "0.10.79"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xvch-5gv4-984h": {
+   "severity": "critical",
+   "introduced": [
+    "1.0.0"
+   ],
+   "fixed": [
+    "1.2.6"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xw59-hvm2-8pj6": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.4.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xw5p-hw6r-2j98": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.15.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GHSA-xxjr-mmjv-4gpg": {
+   "severity": "medium",
+   "introduced": [
+    "4.0.0"
+   ],
+   "fixed": [
+    "4.17.23"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "word"
+  },
+  "GO-2020-0012": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20200220183623-bac4c82f6975"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2020-0013": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20170330155735-e4e2799dd7aa"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2020-0014": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190125091013-d26f9f9a57f3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2021-0053": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.3.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "github.com/gogo/protobuf/plugin/unmarshal"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2021-0078": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20180816102801-aaf60122140d"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2021-0227": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20201216223049-8b5274cf687f"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2021-0238": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20210520170846-37e1c6afe023"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2021-0356": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20220314234659-1baeb1ce4c0b"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0192": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20180925071336-cf3bd585ca2a"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0193": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20180921000356-2f5d2388922f"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0197": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190125002852-4b62a64f59f7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0209": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190320223903-b7391e95e576"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/salsa20/salsa"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0229": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20200124225646-8b5121be2f68"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/cryptobyte"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0236": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20210428140749-89ef3d95e781"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http/httpguts"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0288": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20211209124913-491a49abca63"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2022-0536": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190813141303-74dc4d7220e7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0968": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20211202192323-5770296d904e"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-0969": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20220906165146-f3363e06e74c"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2022-1144": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.4.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2023-1495": {
+   "severity": "high",
+   "introduced": [
+    "0.0.0-20220524220425-1d687d428aca"
+   ],
+   "fixed": [
+    "0.1.1-0.20221104162952-702349b0e862"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2/h2c"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2023-1571": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.7.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2",
+    "golang.org/x/net/http2/hpack"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2023-1988": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.13.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2023-1992": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20190424203555-c05e17bb3b2d"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/openpgp/clearsign"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2023-2102": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.17.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2023-2402": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.17.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2024-2687": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.23.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2024-2961": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.0.0-20220525230936-793ad666bf5e"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/acme/autocert"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2024-3321": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.31.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2024-3333": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.33.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2025-3487": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.35.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2025-3503": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.36.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http/httpproxy",
+    "golang.org/x/net/proxy"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2025-3595": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.38.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2025-4116": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.43.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh/agent"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2025-4134": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.45.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2025-4135": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.45.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh/agent"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-4440": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.45.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-4441": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.45.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-4559": {
+   "severity": "",
+   "introduced": [
+    "0.50.0"
+   ],
+   "fixed": [
+    "0.51.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-4569": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.3.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-4770": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.4.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-4773": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.4.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-4918": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.53.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/http2"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5005": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh/agent"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5006": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh/agent"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5013": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5014": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5015": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5016": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5017": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5018": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5019": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5020": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5021": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh/knownhosts"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5023": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5025": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5026": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/idna"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5027": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5028": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5029": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5030": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.55.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/html"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5033": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.52.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/ssh/agent"
+   ],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5771": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "1.4.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "GO-2026-5932": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/crypto/openpgp",
+    "golang.org/x/crypto/openpgp/armor",
+    "golang.org/x/crypto/openpgp/clearsign",
+    "golang.org/x/crypto/openpgp/elgamal",
+    "golang.org/x/crypto/openpgp/errors",
+    "golang.org/x/crypto/openpgp/packet",
+    "golang.org/x/crypto/openpgp/s2k"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-5942": {
+   "severity": "",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.56.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [
+    "golang.org/x/net/dns/dnsmessage"
+   ],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "GO-2026-6016": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.7.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "MAL-2026-4750": {
+   "severity": "",
+   "introduced": [],
+   "fixed": [],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": true,
+   "severitySource": ""
+  },
+  "PYSEC-2014-13": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.3.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2014-14": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.3.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2015-17": {
+   "severity": "medium",
+   "introduced": [
+    "0",
+    "2.1.0"
+   ],
+   "fixed": [
+    "2.6.0",
+    "3bd8afbff29e50b38f889b2f688785a669b9aafc"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2018-28": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.20.0",
+    "c45d7c49ea75133e52ab22a8e9e13173938e36ff"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2020-150": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.11.7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2020-151": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.11.7"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2020-70": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.5.3",
+    "3e7dfae5d0b3685abf1ede1bc6c086a116ac4746"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2020-71": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.5.3",
+    "f7a56aae32cba823a77a84a1f10400799b19c19a"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2021-100": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.65.2",
+    "fa7e3c996edf2d5482fff8f9d890ac2390dede4d"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2022-183": {
+   "severity": "critical",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.20.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2023-74": {
+   "severity": "medium",
+   "introduced": [
+    "0",
+    "2.3.0"
+   ],
+   "fixed": [
+    "2.31.0",
+    "74ea7cf7a6a27a4eeb2ae24e162bcc942a6706d5"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "PYSEC-2024-38": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.109.1",
+    "9d34ad0ee8a0dfbbcce06f76c2d5d851085024fc"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-1845": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "9.0.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-1872": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.32.4"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-1873": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.32.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-2275": {
+   "severity": "medium",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "2.33.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3555": {
+   "severity": "high",
+   "introduced": [
+    "0.17.0"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3556": {
+   "severity": "high",
+   "introduced": [
+    "0.59.0"
+   ],
+   "fixed": [
+    "0.62.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3557": {
+   "severity": "high",
+   "introduced": [
+    "0.11.6"
+   ],
+   "fixed": [
+    "0.64.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3558": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.62.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3559": {
+   "severity": "high",
+   "introduced": [
+    "0.52.1"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3560": {
+   "severity": "high",
+   "introduced": [
+    "0.9.1"
+   ],
+   "fixed": [
+    "0.61.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3561": {
+   "severity": "high",
+   "introduced": [
+    "0.25.0"
+   ],
+   "fixed": [
+    "0.60.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3562": {
+   "severity": "high",
+   "introduced": [
+    "0.51.0"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3563": {
+   "severity": "low",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.63.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3564": {
+   "severity": "high",
+   "introduced": [
+    "0.9.1"
+   ],
+   "fixed": [
+    "0.61.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3565": {
+   "severity": "high",
+   "introduced": [
+    "0"
+   ],
+   "fixed": [
+    "0.63.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "PYSEC-2026-3566": {
+   "severity": "high",
+   "introduced": [
+    "0.14.1"
+   ],
+   "fixed": [
+    "0.60.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2016-0001": {
+   "severity": "high",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.9.0"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2017-0004": {
+   "severity": "critical",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.5.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2018-0003": {
+   "severity": "critical",
+   "introduced": [
+    "0.3.2",
+    "0.4.0-0",
+    "0.5.0-0",
+    "0.6.0-0"
+   ],
+   "fixed": [
+    "0.3.4",
+    "0.4.5",
+    "0.5.1",
+    "0.6.3"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2018-0010": {
+   "severity": "critical",
+   "introduced": [
+    "0.10.8"
+   ],
+   "fixed": [
+    "0.10.9"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2018-0018": {
+   "severity": "high",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.6.13"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2019-0009": {
+   "severity": "critical",
+   "introduced": [
+    "0.6.5"
+   ],
+   "fixed": [
+    "0.6.10"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2019-0012": {
+   "severity": "critical",
+   "introduced": [
+    "0.6.3"
+   ],
+   "fixed": [
+    "0.6.10"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2020-0071": {
+   "severity": "medium",
+   "introduced": [
+    "0.0.0-0",
+    "0.2.1-0",
+    "0.2.2-0",
+    "0.2.3-0",
+    "0.2.4-0",
+    "0.2.5-0",
+    "0.2.6-0",
+    "0.2.7-0"
+   ],
+   "fixed": [
+    "0.2.0",
+    "0.2.1",
+    "0.2.2",
+    "0.2.23",
+    "0.2.3",
+    "0.2.4",
+    "0.2.5",
+    "0.2.6"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2020-0146": {
+   "severity": "high",
+   "introduced": [
+    "0.10.0",
+    "0.11.0",
+    "0.12.0",
+    "0.13.0",
+    "0.8.0",
+    "0.9.0"
+   ],
+   "fixed": [
+    "0.10.1",
+    "0.11.2",
+    "0.12.4",
+    "0.13.3",
+    "0.8.4",
+    "0.9.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2020-0159": {
+   "severity": "",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.4.20"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "RUSTSEC-2021-0003": {
+   "severity": "critical",
+   "introduced": [
+    "0.6.3",
+    "1.0.0"
+   ],
+   "fixed": [
+    "0.6.14",
+    "1.6.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "cvss"
+  },
+  "RUSTSEC-2021-0072": {
+   "severity": "medium",
+   "introduced": [
+    "0.3.0",
+    "1.6.0",
+    "1.7.0",
+    "1.8.0"
+   ],
+   "fixed": [
+    "1.5.1",
+    "1.6.3",
+    "1.7.2",
+    "1.8.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2021-0124": {
+   "severity": "high",
+   "introduced": [
+    "0.1.14",
+    "1.9.0"
+   ],
+   "fixed": [
+    "1.13.1",
+    "1.8.4"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2022-0040": {
+   "severity": "",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": ""
+  },
+  "RUSTSEC-2023-0001": {
+   "severity": "medium",
+   "introduced": [
+    "1.19.0",
+    "1.21.0",
+    "1.7.0"
+   ],
+   "fixed": [
+    "1.18.4",
+    "1.20.3",
+    "1.23.1"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2023-0005": {
+   "severity": "low",
+   "introduced": [
+    "0.2.0",
+    "1.19.0",
+    "1.21.0"
+   ],
+   "fixed": [
+    "1.18.5",
+    "1.20.4",
+    "1.24.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2023-0022": {
+   "severity": "medium",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.48"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2023-0023": {
+   "severity": "high",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.48"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2023-0024": {
+   "severity": "high",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.48"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2023-0044": {
+   "severity": "medium",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.55"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2023-0072": {
+   "severity": "medium",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.60"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2024-0357": {
+   "severity": "medium",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.66"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2025-0004": {
+   "severity": "medium",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "0.10.70"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2025-0022": {
+   "severity": "medium",
+   "introduced": [
+    "0.10.39"
+   ],
+   "fixed": [
+    "0.10.72"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2025-0023": {
+   "severity": "low",
+   "introduced": [
+    "0.2.5",
+    "1.39.0",
+    "1.43.0",
+    "1.44.0"
+   ],
+   "fixed": [
+    "1.38.2",
+    "1.42.1",
+    "1.43.1",
+    "1.44.2"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2026-0009": {
+   "severity": "medium",
+   "introduced": [
+    "0.3.6"
+   ],
+   "fixed": [
+    "0.3.47"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": "alias"
+  },
+  "RUSTSEC-2026-0190": {
+   "severity": "",
+   "introduced": [
+    "0.0.0-0"
+   ],
+   "fixed": [
+    "1.0.103"
+   ],
+   "lastAffected": [],
+   "affectedImports": [],
+   "withdrawn": false,
+   "severitySource": ""
   }
+ },
+ "match": [
+  {
+   "ecosystem": "go",
+   "package": "github.com/golangci/golangci-lint/v2",
+   "version": "v2.12.2",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "v1.7.0",
+   "records": 8,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "go",
+   "package": "github.com/oapi-codegen/oapi-codegen/v2",
+   "version": "v2.8.0",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "go",
+   "package": "github.com/oapi-codegen/runtime",
+   "version": "v1.7.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "go",
+   "package": "github.com/spf13/cobra",
+   "version": "v1.10.2",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "go",
+   "package": "github.com/stretchr/testify",
+   "version": "v1.12.1",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "go",
+   "package": "github.com/vektra/mockery/v3",
+   "version": "v3.7.3",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "v0.55.0",
+   "records": 55,
+   "ids": [
+    "GO-2026-5932"
+   ],
+   "outcome": "findings"
+  },
+  {
+   "ecosystem": "go",
+   "package": "sigs.k8s.io/yaml",
+   "version": "v1.6.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/forge-ci-spec",
+   "version": "v0.2.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/forge-register-spec",
+   "version": "v0.1.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/forge-revision-spec",
+   "version": "v0.3.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/forge",
+   "version": "v0.43.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-configgen",
+   "version": "v0.1.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-e2e",
+   "version": "v0.1.0-dev.r00000021.g614498263fce",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-go",
+   "version": "v0.1.0-dev.r00000030.g48b21f3ae47f",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-python",
+   "version": "v0.1.0-dev.r00000028.g85b400dd85f5",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-rust",
+   "version": "v0.1.0-dev.r00000035.g3a25e157e9a9",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-spec",
+   "version": "v0.2.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "internal",
+   "package": "github.com/alexandremahdhaoui/golden-typescript",
+   "version": "v0.1.0-dev.r00000034.g2dfed0dc180f",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.74.0",
+   "records": 24,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "python",
+   "package": "fastapi",
+   "version": "0.141.1",
+   "records": 5,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "python",
+   "package": "httpx",
+   "version": "0.28.1",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "python",
+   "package": "openapi-python-client",
+   "version": "0.29.0",
+   "records": 4,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "python",
+   "package": "pytest-cov",
+   "version": "7.1.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "python",
+   "package": "pytest-mock",
+   "version": "3.15.1",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "python",
+   "package": "pytest",
+   "version": "9.1.1",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "python",
+   "package": "ruff",
+   "version": "0.16.4",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "python",
+   "package": "typer",
+   "version": "0.27.1",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "python",
+   "package": "uvicorn",
+   "version": "0.52.4",
+   "records": 4,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "anyhow",
+   "version": "1.0.104",
+   "records": 1,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "axum",
+   "version": "0.8.9",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "base64",
+   "version": "0.23.1",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "chrono",
+   "version": "0.4.45",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "clap",
+   "version": "4.6.6",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "mockall",
+   "version": "0.15.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "reqwest",
+   "version": "0.13.4",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "serde",
+   "version": "1.0.229",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "serde_json",
+   "version": "1.0.151",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "thiserror",
+   "version": "2.0.20",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "1.53.1",
+   "records": 10,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "rust",
+   "package": "uuid",
+   "version": "1.25.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "@eslint/js",
+   "version": "10.0.1",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "@hey-api/openapi-ts",
+   "version": "0.99.0",
+   "records": 1,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "@types/node",
+   "version": "26.2.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "@vitest/coverage-v8",
+   "version": "4.1.11",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "commander",
+   "version": "15.0.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "eslint",
+   "version": "10.9.0",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "5.12.1",
+   "records": 10,
+   "ids": [],
+   "outcome": "clean"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "neverthrow",
+   "version": "8.2.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "prettier",
+   "version": "3.9.6",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "tsx",
+   "version": "4.23.12",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "typescript-eslint",
+   "version": "8.67.0",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "typescript",
+   "version": "7.0.2",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "vitest-mock-extended",
+   "version": "5.1.1",
+   "records": 0,
+   "ids": [],
+   "outcome": "not-found"
+  },
+  {
+   "ecosystem": "typescript",
+   "package": "vitest",
+   "version": "4.1.11",
+   "records": 2,
+   "ids": [],
+   "outcome": "clean"
+  }
+ ],
+ "errors": [
+  {
+   "case": "nonexistent-package",
+   "status": 200,
+   "body": "{}",
+   "outcome": "not-found",
+   "reasonContains": "the feed carries no record",
+   "why": "200 with an empty body is the feed saying it has never heard of this package. It is also what a clean package returns, which is why the outcome is recorded rather than inferred."
+  },
+  {
+   "case": "unreachable-feed",
+   "status": 503,
+   "outcome": "unreachable",
+   "reasonContains": "could not be reached",
+   "why": "nothing was measured. Recording zero vulnerabilities here is the bug that made 56 index files claim packages were clean."
+  },
+  {
+   "case": "nonexistent-vuln",
+   "status": 404,
+   "outcome": "error",
+   "reasonContains": "status 404",
+   "why": "a record named by a package query and then missing is a broken feed, not a clean package. It fails rather than warning."
+  }
+ ],
+ "counts": {
+  "records": 267,
+  "packages": 69,
+  "severityResolved": 248,
+  "severityUnknown": 19,
+  "why": "92.9 percent of records resolve to a severity. Reading only the database's own word covers 56 percent; the CVSS vector and the alias hop are what carry the rest."
+ },
+ "probes": [
+  {
+   "id": "GHSA-247c-9743-5963",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "5.3.2"
+  },
+  {
+   "id": "GHSA-29mw-wpgm-hmr9",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "4.0.0"
+  },
+  {
+   "id": "GHSA-2grh-hm3w-w7hv",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "1.8.0"
+  },
+  {
+   "id": "GHSA-2wrh-6pvc-2jm9",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-3358-4f7f-p4j4",
+   "ecosystem": "rust",
+   "package": "generic-array",
+   "version": "0.13.0"
+  },
+  {
+   "id": "GHSA-33c7-2mpw-hg34",
+   "ecosystem": "python",
+   "package": "uvicorn",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-34p9-f4q3-c4r7",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-35jh-r3h4-6jhm",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-386q-5hp3-95m9",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.17.0"
+  },
+  {
+   "id": "GHSA-3fjj-p79j-c9hh",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "4.0.0"
+  },
+  {
+   "id": "GHSA-3gxf-9r58-2ghg",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.7"
+  },
+  {
+   "id": "GHSA-4374-p667-p6c8",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-43w2-9j62-hq99",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.6.3"
+  },
+  {
+   "id": "GHSA-442q-2j6p-642g",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.59.0"
+  },
+  {
+   "id": "GHSA-444r-cwp2-x5xf",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-455w-c45v-86rg",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "4.0.0"
+  },
+  {
+   "id": "GHSA-45gg-vh54-h5m9",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-45x7-px36-x8w8",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.1.0"
+  },
+  {
+   "id": "GHSA-4fcv-w3qc-ppgg",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.39"
+  },
+  {
+   "id": "GHSA-4q83-7cq4-p6wg",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "1.21.0"
+  },
+  {
+   "id": "GHSA-4v7x-pqxf-cx7m",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-4xc9-xhrj-v574",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-5578-w22f-pfx9",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.11.6"
+  },
+  {
+   "id": "GHSA-55m5-whcv-c49c",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-573f-x89g-hqp9",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "5.7.2"
+  },
+  {
+   "id": "GHSA-5cgq-3rg8-m6cv",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-5cv4-jp36-h3mw",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-5xrq-8626-4rwp",
+   "ecosystem": "typescript",
+   "package": "vitest",
+   "version": "4.0.0"
+  },
+  {
+   "id": "GHSA-652x-xj99-gmcc",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-66p5-j55p-32r9",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-67hx-6x53-jw92",
+   "ecosystem": "typescript",
+   "package": "@babel/traverse",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-69gw-hgj3-45m7",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.6.3"
+  },
+  {
+   "id": "GHSA-6hcf-g6gr-hhcr",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.7"
+  },
+  {
+   "id": "GHSA-6w46-j5rx-g56g",
+   "ecosystem": "python",
+   "package": "pytest",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-78mq-xcr3-xm33",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-7rrj-xr53-82p7",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "1.7.0"
+  },
+  {
+   "id": "GHSA-7wgr-7666-7pwj",
+   "ecosystem": "python",
+   "package": "openapi-python-client",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-8359-h9fx-j6v9",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-89gr-r52h-f8rx",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-89xv-2j6f-qhc8",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-8c75-8mhr-p7r9",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.24"
+  },
+  {
+   "id": "GHSA-8h2j-cgx8-6xv7",
+   "ecosystem": "python",
+   "package": "fastapi",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-8m8r-38jm-f355",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.52.1"
+  },
+  {
+   "id": "GHSA-954p-556p-r752",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.9.1"
+  },
+  {
+   "id": "GHSA-9crc-q9x8-hgqq",
+   "ecosystem": "typescript",
+   "package": "vitest",
+   "version": "1.0.0"
+  },
+  {
+   "id": "GHSA-9hjg-9r4m-mvj7",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-9m57-25v3-79x9",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-9qwg-crg9-m2vc",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.7"
+  },
+  {
+   "id": "GHSA-9wx4-h78v-vm56",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-9x4c-63pf-525f",
+   "ecosystem": "python",
+   "package": "openapi-python-client",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-c3h9-896r-86jm",
+   "ecosystem": "go",
+   "package": "github.com/gogo/protobuf",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-cfj3-7x9c-4p3h",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-f23m-r3pf-42rh",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-f5wc-c3c7-36mc",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-f6x5-jh6r-wrfv",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-f97h-2pfx-f59f",
+   "ecosystem": "python",
+   "package": "uvicorn",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-fg7r-2g4j-5cgr",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "0.1.14"
+  },
+  {
+   "id": "GHSA-fvqr-27wr-82fm",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-fxg5-wq6x-vr4w",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.0-20220524220425-1d687d428aca"
+  },
+  {
+   "id": "GHSA-gc5v-m9x4-r6x2",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-ghm9-cr32-g9qj",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.39"
+  },
+  {
+   "id": "GHSA-h8pj-cxx2-jfg2",
+   "ecosystem": "python",
+   "package": "httpx",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-hcg3-q754-cr77",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-hhx9-57xq-r5rw",
+   "ecosystem": "typescript",
+   "package": "@hey-api/openapi-ts",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-hppc-g8h3-xhp3",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.24"
+  },
+  {
+   "id": "GHSA-j5w8-q4qc-rx2x",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-j884-q54q-mmx3",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.25.0"
+  },
+  {
+   "id": "GHSA-j8r2-6x86-q33q",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "2.3.0"
+  },
+  {
+   "id": "GHSA-jf85-cpcp-j695",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-jppx-rxg9-jmrx",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-jx2c-rxcm-jvmq",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-m34r-v34r-rf9q",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.51.0"
+  },
+  {
+   "id": "GHSA-mg2h-6x62-wpwc",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "5.0.0"
+  },
+  {
+   "id": "GHSA-mh6f-8j2x-4483",
+   "ecosystem": "typescript",
+   "package": "event-stream",
+   "version": "3.3.6"
+  },
+  {
+   "id": "GHSA-mm7v-vpv8-xfc3",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.6.5"
+  },
+  {
+   "id": "GHSA-mq6c-fh97-4gwv",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-mrq3-vjjr-p77c",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-p6mc-m468-83gw",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "3.7.0"
+  },
+  {
+   "id": "GHSA-pg2w-x9wp-vw92",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "2.1.0"
+  },
+  {
+   "id": "GHSA-phqj-4mhp-q6mq",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.50"
+  },
+  {
+   "id": "GHSA-pqf5-4pqq-29f5",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.27"
+  },
+  {
+   "id": "GHSA-q382-vc8q-7jhj",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-q445-7m23-qrmw",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-q4h4-gmj2-qvw2",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-qppj-fm5r-hxr3",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-qpw4-5x99-6vjp",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-qxp5-gwg8-xv66",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-r5fr-rjxr-66jc",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "4.0.0"
+  },
+  {
+   "id": "GHSA-r5vv-ff45-prp2",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-r6v5-fh4h-64xc",
+   "ecosystem": "rust",
+   "package": "time",
+   "version": "0.3.6"
+  },
+  {
+   "id": "GHSA-rfr2-mq9m-x2qx",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.9.1"
+  },
+  {
+   "id": "GHSA-rjwr-m7qx-3fjr",
+   "ecosystem": "go",
+   "package": "github.com/oapi-codegen/oapi-codegen/v2",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-rm3j-f69w-wqmq",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-rpmj-rpgj-qmpm",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.0"
+  },
+  {
+   "id": "GHSA-rr8g-9fpq-6wmg",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "1.44.0"
+  },
+  {
+   "id": "GHSA-rxr4-x558-x7hw",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.3.2"
+  },
+  {
+   "id": "GHSA-v778-237x-gjrc",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-vgwf-h737-ff37",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-vh95-rmgr-6w4m",
+   "ecosystem": "typescript",
+   "package": "minimist",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-vvgc-356p-c3xw",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-vvpx-j8f3-3w6h",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-vx7x-vcc2-c44g",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-w879-237q-wc7r",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-wcg3-cvx6-7396",
+   "ecosystem": "rust",
+   "package": "time",
+   "version": "0.1.0"
+  },
+  {
+   "id": "GHSA-wjv6-jcfj-mf9r",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.14.1"
+  },
+  {
+   "id": "GHSA-wvj2-96wp-fq3f",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-x527-x647-q7gg",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-x5rq-j2xg-h7qm",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "4.7.0"
+  },
+  {
+   "id": "GHSA-x67x-vg9m-65c3",
+   "ecosystem": "rust",
+   "package": "base64",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-x84v-xcm2-53pg",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-xcf7-rvmh-g6q4",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.0"
+  },
+  {
+   "id": "GHSA-xjxc-vfw2-cg96",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.8"
+  },
+  {
+   "id": "GHSA-xmgf-hq76-4vx2",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.0"
+  },
+  {
+   "id": "GHSA-xp3w-r5p5-63rr",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.9.7"
+  },
+  {
+   "id": "GHSA-xphf-cx8h-7q9g",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.29"
+  },
+  {
+   "id": "GHSA-xrjj-mj9h-534m",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-xv59-967r-8726",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.0"
+  },
+  {
+   "id": "GHSA-xvch-5gv4-984h",
+   "ecosystem": "typescript",
+   "package": "minimist",
+   "version": "1.0.0"
+  },
+  {
+   "id": "GHSA-xw59-hvm2-8pj6",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-xw5p-hw6r-2j98",
+   "ecosystem": "typescript",
+   "package": "fastify",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GHSA-xxjr-mmjv-4gpg",
+   "ecosystem": "typescript",
+   "package": "lodash",
+   "version": "4.0.0"
+  },
+  {
+   "id": "GO-2021-0053",
+   "ecosystem": "go",
+   "package": "github.com/gogo/protobuf",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2022-1144",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2023-1495",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.0-20220524220425-1d687d428aca"
+  },
+  {
+   "id": "GO-2023-1571",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2023-1988",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2023-2102",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2023-2402",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2024-2687",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2024-3321",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2024-3333",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2025-3487",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2025-3503",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2025-3595",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2025-4116",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2025-4134",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2025-4135",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-4440",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-4441",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-4559",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.50.0"
+  },
+  {
+   "id": "GO-2026-4569",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-4770",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-4773",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-4918",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5005",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5006",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5013",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5014",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5015",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5016",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5017",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5018",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5019",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5020",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5021",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5023",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5025",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5026",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5027",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5028",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5029",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5030",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5033",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5771",
+   "ecosystem": "go",
+   "package": "github.com/modelcontextprotocol/go-sdk",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5932",
+   "ecosystem": "go",
+   "package": "golang.org/x/crypto",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-5942",
+   "ecosystem": "go",
+   "package": "golang.org/x/net",
+   "version": "0.0.1"
+  },
+  {
+   "id": "GO-2026-6016",
+   "ecosystem": "go",
+   "package": "github.com/oapi-codegen/oapi-codegen/v2",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2014-13",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2014-14",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2015-17",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "2.1.0"
+  },
+  {
+   "id": "PYSEC-2018-28",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2020-150",
+   "ecosystem": "python",
+   "package": "uvicorn",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2020-151",
+   "ecosystem": "python",
+   "package": "uvicorn",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2020-70",
+   "ecosystem": "python",
+   "package": "openapi-python-client",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2020-71",
+   "ecosystem": "python",
+   "package": "openapi-python-client",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2021-100",
+   "ecosystem": "python",
+   "package": "fastapi",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2022-183",
+   "ecosystem": "python",
+   "package": "httpx",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2023-74",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "2.3.0"
+  },
+  {
+   "id": "PYSEC-2024-38",
+   "ecosystem": "python",
+   "package": "fastapi",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-1845",
+   "ecosystem": "python",
+   "package": "pytest",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-1872",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-1873",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-2275",
+   "ecosystem": "python",
+   "package": "requests",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-3555",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.17.0"
+  },
+  {
+   "id": "PYSEC-2026-3556",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.59.0"
+  },
+  {
+   "id": "PYSEC-2026-3557",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.11.6"
+  },
+  {
+   "id": "PYSEC-2026-3558",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-3559",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.52.1"
+  },
+  {
+   "id": "PYSEC-2026-3560",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.9.1"
+  },
+  {
+   "id": "PYSEC-2026-3561",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.25.0"
+  },
+  {
+   "id": "PYSEC-2026-3562",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.51.0"
+  },
+  {
+   "id": "PYSEC-2026-3563",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-3564",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.9.1"
+  },
+  {
+   "id": "PYSEC-2026-3565",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.0.1"
+  },
+  {
+   "id": "PYSEC-2026-3566",
+   "ecosystem": "python",
+   "package": "datamodel-code-generator",
+   "version": "0.14.1"
+  },
+  {
+   "id": "RUSTSEC-2016-0001",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2017-0004",
+   "ecosystem": "rust",
+   "package": "base64",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2018-0003",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.3.2"
+  },
+  {
+   "id": "RUSTSEC-2018-0010",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.8"
+  },
+  {
+   "id": "RUSTSEC-2018-0018",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2019-0009",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.6.5"
+  },
+  {
+   "id": "RUSTSEC-2019-0012",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.6.3"
+  },
+  {
+   "id": "RUSTSEC-2020-0071",
+   "ecosystem": "rust",
+   "package": "time",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2020-0146",
+   "ecosystem": "rust",
+   "package": "generic-array",
+   "version": "0.8.0"
+  },
+  {
+   "id": "RUSTSEC-2020-0159",
+   "ecosystem": "rust",
+   "package": "chrono",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2021-0003",
+   "ecosystem": "rust",
+   "package": "smallvec",
+   "version": "0.6.3"
+  },
+  {
+   "id": "RUSTSEC-2021-0072",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "0.3.0"
+  },
+  {
+   "id": "RUSTSEC-2021-0124",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "0.1.14"
+  },
+  {
+   "id": "RUSTSEC-2023-0001",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "1.7.0"
+  },
+  {
+   "id": "RUSTSEC-2023-0005",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "0.2.0"
+  },
+  {
+   "id": "RUSTSEC-2023-0022",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2023-0023",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2023-0024",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2023-0044",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2023-0072",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2024-0357",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2025-0004",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.0.0-0"
+  },
+  {
+   "id": "RUSTSEC-2025-0022",
+   "ecosystem": "rust",
+   "package": "openssl",
+   "version": "0.10.39"
+  },
+  {
+   "id": "RUSTSEC-2025-0023",
+   "ecosystem": "rust",
+   "package": "tokio",
+   "version": "0.2.5"
+  },
+  {
+   "id": "RUSTSEC-2026-0009",
+   "ecosystem": "rust",
+   "package": "time",
+   "version": "0.3.6"
+  },
+  {
+   "id": "RUSTSEC-2026-0190",
+   "ecosystem": "rust",
+   "package": "anyhow",
+   "version": "0.0.0-0"
+  }
+ ]
 }

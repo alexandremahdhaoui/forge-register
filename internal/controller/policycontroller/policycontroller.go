@@ -398,12 +398,12 @@ func EvaluateQuiet(in DeprecationInput, now time.Time, p regtypes.Params) *time.
 	return &since
 }
 
+// currentVector is what the register last measured for the version the track
+// is on. It sits on the track itself now: it described the current version
+// all along, and reaching for the last row of a history array to find it was
+// the only thing that array was load-bearing for.
 func currentVector(track regtypes.Track) regtypes.Vector {
-	if len(track.History) == 0 {
-		return regtypes.Vector{}
-	}
-
-	return track.History[len(track.History)-1].Vulns
+	return track.Vulns
 }
 
 func quarantine(p regtypes.Params) time.Duration {

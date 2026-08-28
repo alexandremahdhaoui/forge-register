@@ -226,7 +226,7 @@ var devSHA = regexp.MustCompile(`\.g([0-9a-f]{7,40})$`)
 func (d *Driver) staleInternal(
 	ctx context.Context, t regtypes.Track, heads map[string]string,
 ) (head, pinned string, stale bool) {
-	if d.deps.RemoteHead == nil || t.Ecosystem != "internal" || len(t.History) == 0 {
+	if d.deps.RemoteHead == nil || t.Ecosystem != "internal" {
 		return "", "", false
 	}
 
@@ -235,7 +235,7 @@ func (d *Driver) staleInternal(
 		return "", "", false
 	}
 
-	source := t.History[len(t.History)-1].Source
+	source := t.Source
 	if source == "" {
 		return "", "", false
 	}

@@ -356,17 +356,17 @@ func TestStatusMarksAStaleInternalTrack(t *testing.T) {
 		{
 			Ecosystem: "internal", Package: "github.com/o/stale", Prefix: "0",
 			Current: "v0.1.0-dev.r00000027.g954127a605c5",
-			History: []regtypes.Entry{{Source: "git@github.com:o/stale.git"}},
+			Source:  "git@github.com:o/stale.git",
 		},
 		{
 			Ecosystem: "internal", Package: "github.com/o/fresh", Prefix: "0",
 			Current: "v0.1.0-dev.r00000035.gbeefbeefbeef",
-			History: []regtypes.Entry{{Source: "git@github.com:o/stale.git"}},
+			Source:  "git@github.com:o/stale.git",
 		},
 		{
 			Ecosystem: "go", Package: "github.com/x/tagged", Prefix: "1",
 			Current: "1.2.3",
-			History: []regtypes.Entry{{Source: "https://example.com/x"}},
+			Source:  "https://example.com/x",
 		},
 	}, nil).Once()
 	h.store.EXPECT().PendingRequests(mock.Anything).Return(nil, nil).Once()
@@ -401,7 +401,7 @@ func TestStatusStaysQuietWhenTheProbeFails(t *testing.T) {
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{{
 		Ecosystem: "internal", Package: "github.com/o/stale", Prefix: "0",
 		Current: "v0.1.0-dev.r00000027.g954127a605c5",
-		History: []regtypes.Entry{{Source: "git@github.com:o/stale.git"}},
+		Source:  "git@github.com:o/stale.git",
 	}}, nil).Once()
 	h.store.EXPECT().PendingRequests(mock.Anything).Return(nil, nil).Once()
 

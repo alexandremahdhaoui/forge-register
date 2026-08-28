@@ -99,3 +99,37 @@ func TestAZeroBaseURLsFallsBackToThePublicRegistries(t *testing.T) {
 	// Construction applies the defaults; no request is made here.
 	require.NotNil(t, registryadapter.New(nil, registryadapter.BaseURLs{}))
 }
+
+// crates.io refuses a request with no User-Agent, and the 403 reads exactly
+// like a blocked network. Verified against the live API: without the header
+// 403, with it 200. Believing the 403 is what produced a local stand-in and
+// a rust index with no release dates.
+func TestEveryRegistryRequestIdentifiesItself(t *testing.T) {
+	seen := make(chan string, 4)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("User-Agent") == "" {
+			// What crates.io really does.
+			http.Error(w, "We require that all requests include a `User-Agent` header.",
+				http.StatusForbidden)
+
+			return
+		}
+
+		select {
+		case seen <- r.Header.Get("User-Agent"):
+		default:
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"versions":[{"num":"1.0.0","created_at":"2026-01-01T00:00:00Z"}]}`))
+	}))
+	defer server.Close()
+
+	got, err := registryadapter.New(nil, registryadapter.BaseURLs{Crates: server.URL}).
+		Versions(context.Background(), "rust", "serde")
+	require.NoError(t, err, "a missing User-Agent must never look like a blocked network")
+	require.Len(t, got, 1)
+
+	require.Contains(t, <-seen, "forge-register")
+}

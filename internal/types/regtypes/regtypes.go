@@ -88,12 +88,59 @@ type Vuln struct {
 	Introduced []string
 	FixedIn    []string
 
+	// LastAffected closes a range without naming a fix. It is kept apart
+	// from FixedIn on purpose: the last version an advisory covers is not
+	// a version that fixes anything, and folding the two together would
+	// report a fix that does not exist.
+	LastAffected []string
+
 	// AffectedImports are the import paths the advisory is scoped to, where
 	// the ecosystem publishes them (largely a Go convention). Empty means
 	// the feed gave no scope, NOT that everything is affected - the
 	// difference decides whether a consumer can clear an advisory on the
 	// merits, so the two must never collapse into one.
 	AffectedImports []string
+
+	// MatchedRange names the published range that covers our version, in
+	// the feed's own words, so a human can check the reasoning instead of
+	// trusting it.
+	MatchedRange string
+}
+
+// Outcome says what actually happened when the feed was asked about one
+// version. It exists because three different situations all answer HTTP 200
+// with the body "{}": a package with no vulnerabilities, a package the feed
+// has never heard of, and a request the feed could not read. Recording only
+// a count of zero turned all three into the claim "this is clean".
+type Outcome string
+
+const (
+	// OutcomeFindings means a published range covers this version.
+	OutcomeFindings Outcome = "findings"
+	// OutcomeClean means the feed answered and no range covers this version.
+	OutcomeClean Outcome = "clean"
+	// OutcomeNotFound means the feed does not carry this package at all.
+	OutcomeNotFound Outcome = "not-found"
+	// OutcomeUnreachable means the request failed, so nothing was measured.
+	OutcomeUnreachable Outcome = "unreachable"
+)
+
+// Answer is everything the feed said about one version, including why it
+// said nothing when it said nothing. Reason is written for a person reading
+// the record months later, so it never reads as a conclusion the data does
+// not support.
+type Answer struct {
+	Outcome Outcome
+	Reason  string
+	Vulns   []Vuln
+}
+
+// Measured reports whether this answer rests on something the feed actually
+// said about this version. not-found and unreachable do not: their empty
+// vector is an absence of knowledge, not a finding of safety, and treating
+// the two alike is what let 56 index files claim packages were clean.
+func (a Answer) Measured() bool {
+	return a.Outcome == OutcomeFindings || a.Outcome == OutcomeClean
 }
 
 // VectorOf folds vulnerabilities into a vector. An unrecognised severity
@@ -123,17 +170,11 @@ type Candidate struct {
 	ReleasedAt time.Time
 	Vulns      Vector
 	VulnIDs    []string
-}
 
-// Entry is one adopted version in a track's history.
-type Entry struct {
-	Version     string
-	ReleasedAt  time.Time
-	AdoptedAt   time.Time
-	Vulns       Vector
-	Source      string
-	Provenance  string
-	OSVSnapshot string
+	// Outcome and Reason carry how Vulns was arrived at, all the way from
+	// the feed to the file. A zero vector means nothing on its own.
+	Outcome Outcome
+	Reason  string
 }
 
 // Advisory marks a current version carrying a vulnerability with no fixed
@@ -156,14 +197,32 @@ const (
 )
 
 // Track is a maintained line of one package: one current version, named by a
-// semver prefix.
+// semver prefix. It carries no history. The register lives in a git repository, and
+// git already records every version this file ever held, with the commit
+// that caused each change. A parallel log inside the tracked files was 545
+// verdict records and one array per track restating what `git log -p` gives
+// for free, so the files now hold current state only.
 type Track struct {
-	Package    string
-	Ecosystem  string
-	Prefix     string
-	Current    string
-	UpdatedAt  time.Time
-	History    []Entry
+	Package   string
+	Ecosystem string
+	Prefix    string
+	Current   string
+	UpdatedAt time.Time
+
+	// The current version's own facts, formerly the last history row.
+	ReleasedAt  time.Time
+	AdoptedAt   time.Time
+	Vulns       Vector
+	Source      string
+	Provenance  string
+	OSVSnapshot string
+
+	// Outcome and Reason say how Vulns was arrived at. A zero vector with
+	// OutcomeNotFound is not the same claim as a zero vector with
+	// OutcomeClean, and the file has to be able to tell them apart.
+	Outcome Outcome
+	Reason  string
+
 	Advisory   *Advisory
 	Deprecated *Deprecation
 	// QuietSince is upstream's last release into the track, set by policy

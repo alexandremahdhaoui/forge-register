@@ -1,6 +1,20 @@
-// Package osvadapter reads known vulnerabilities from an OSV-shaped feed and
-// records the snapshot digest every verdict cites, so a decision replays and
-// explains itself.
+// Package osvadapter reads known vulnerabilities from an OSV-shaped feed.
+//
+// Two rules shape this file. Both were learned from real responses rather
+// than from the documentation.
+//
+// The feed's version filter is a hint, never the answer. Asked about
+// golang.org/x/crypto at "not-a-version" the API answers 200 with 37 records
+// when the truth is 36. It does not error and it does not return everything;
+// it returns a wrong answer that looks right. So a package is asked WITHOUT a
+// version, and the ranges each record publishes decide which of our versions
+// it covers. The filtered query still rides along in the same batch, purely
+// so a disagreement can be reported.
+//
+// An empty answer is not a clean answer. A package with no vulnerabilities, a
+// package the feed has never heard of, and a request it could not read all
+// come back as 200 with the body "{}". Every version therefore carries an
+// outcome naming which of those happened, and the reason travels with it.
 package osvadapter
 
 import (
@@ -12,21 +26,32 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/alexandremahdhaoui/forge-register/internal/types/regtypes"
 )
 
-// Querier reads the vulnerabilities affecting each of a package's versions.
+// userAgent identifies us to every feed we read. crates.io answers 403 to a
+// request without one, which is what a whole afternoon of "the network is
+// blocked" turned out to be.
+const userAgent = "forge-register (+https://github.com/alexandremahdhaoui/forge-register)"
+
+// maxPages bounds the pagination loop. The feed pages at a thousand records
+// per query and hands back a token per result; a token that never clears is
+// a broken feed, and looping on it forever is worse than failing.
+const maxPages = 64
+
+// Querier reads what a feed knows about a package's versions.
 type Querier interface {
-	Vulns(ctx context.Context, ecosystem, pkg string, versions []string) (map[string][]regtypes.Vuln, string, error)
+	Vulns(ctx context.Context, ecosystem, pkg string, versions []string) (map[string]regtypes.Answer, string, error)
 }
 
-// ecosystems maps register ecosystems to OSV's names. Internal packages
-// enter by proof, not discovery - but they are public Go modules and their
-// vulnerabilities are as real as anyone's, so their vectors are asked
-// under OSV's Go ecosystem.
+// ecosystems maps register ecosystems to OSV's names. Internal packages enter
+// by proof, not discovery - but they are public Go modules and their
+// vulnerabilities are as real as anyone's, so they are asked as Go.
 var ecosystems = map[string]string{
 	"go":         "Go",
 	"internal":   "Go",
@@ -39,11 +64,23 @@ var ecosystems = map[string]string{
 type HTTP struct {
 	client *http.Client
 	base   string
+
+	// warn reports what a human needs to know but must not be stopped by.
+	// It is a field so a test can read the warnings instead of the terminal.
+	warn func(format string, args ...any)
 }
 
 var _ Querier = (*HTTP)(nil)
 
-func New(client *http.Client, base string) *HTTP {
+// Option configures the adapter.
+type Option func(*HTTP)
+
+// WithWarner sends warnings somewhere other than stderr.
+func WithWarner(f func(format string, args ...any)) Option {
+	return func(h *HTTP) { h.warn = f }
+}
+
+func New(client *http.Client, base string, opts ...Option) *HTTP {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -52,135 +89,484 @@ func New(client *http.Client, base string) *HTTP {
 		base = "https://api.osv.dev"
 	}
 
-	return &HTTP{client: client, base: base}
+	h := &HTTP{
+		client: client,
+		base:   base,
+		warn: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "WARN "+format+"\n", args...)
+		},
+	}
+
+	for _, o := range opts {
+		o(h)
+	}
+
+	return h
 }
 
-// Vulns queries every version in one batch, resolves each vulnerability's
-// severity once, and returns the sha256 digest of the canonical response set.
-func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []string) (map[string][]regtypes.Vuln, string, error) {
+// batchQuery is one entry of a querybatch request. Version is omitted for the
+// authoritative package-wide query.
+type batchQuery struct {
+	Package struct {
+		Name      string `json:"name"`
+		Ecosystem string `json:"ecosystem"`
+	} `json:"package"`
+	Version   string `json:"version,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
+}
+
+type batchResult struct {
+	Vulns []struct {
+		ID       string `json:"id"`
+		Modified string `json:"modified"`
+	} `json:"vulns"`
+	NextPageToken string `json:"next_page_token"`
+}
+
+// Vulns answers what the feed knows about each version.
+//
+// One HTTP call carries every query: the package-wide one that decides the
+// answer, and one filtered query per version whose only job is to disagree
+// out loud.
+func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []string) (map[string]regtypes.Answer, string, error) {
+	out := make(map[string]regtypes.Answer, len(versions))
+
 	osvEco, ok := ecosystems[ecosystem]
 	if !ok {
-		return map[string][]regtypes.Vuln{}, digestOf(nil), nil
+		reason := fmt.Sprintf("ecosystem %q has no vulnerability feed", ecosystem)
+		for _, v := range versions {
+			out[v] = regtypes.Answer{Outcome: regtypes.OutcomeNotFound, Reason: reason}
+		}
+
+		return out, digestOf(nil), nil
 	}
 
-	type query struct {
-		Package struct {
-			Name      string `json:"name"`
-			Ecosystem string `json:"ecosystem"`
-		} `json:"package"`
-		Version string `json:"version"`
+	// A version that is not a version cannot be compared against a range.
+	// Left alone it sorts below everything, so every advisory opening at
+	// "introduced: 0" would appear to cover it - which is the feed's own bug
+	// reproduced locally rather than caught. Our own data being wrong is not
+	// a feed condition, so it fails rather than warns.
+	for _, v := range versions {
+		if !regtypes.IsVersion(v) {
+			return nil, "", fmt.Errorf("%s %s: %q is not a version, so no published range can be evaluated",
+				ecosystem, pkg, v)
+		}
 	}
 
-	var in struct {
-		Queries []query `json:"queries"`
-	}
+	queries := make([]batchQuery, 0, len(versions)+1)
+
+	all := batchQuery{}
+	all.Package.Name = pkg
+	all.Package.Ecosystem = osvEco
+	queries = append(queries, all)
 
 	for _, v := range versions {
-		q := query{Version: v}
+		q := batchQuery{Version: v}
 		q.Package.Name = pkg
 		q.Package.Ecosystem = osvEco
-		in.Queries = append(in.Queries, q)
+		queries = append(queries, q)
 	}
 
-	var out struct {
-		Results []struct {
-			Vulns []struct {
-				ID string `json:"id"`
-			} `json:"vulns"`
-		} `json:"results"`
+	results, err := h.queryBatch(ctx, queries)
+	if err != nil {
+		// A feed we could not reach measured nothing. Saying so is the
+		// whole point: a zero here used to be indistinguishable from a
+		// package that is genuinely clean.
+		reason := fmt.Sprintf("the vulnerability feed could not be reached: %v", err)
+		h.warn("%s %s: %s - nothing was checked", ecosystem, pkg, reason)
+
+		for _, v := range versions {
+			out[v] = regtypes.Answer{Outcome: regtypes.OutcomeUnreachable, Reason: reason}
+		}
+
+		return out, digestOf(nil), nil
 	}
 
-	if err := h.postJSON(ctx, h.base+"/v1/querybatch", in, &out); err != nil {
-		return nil, "", fmt.Errorf("querying vulnerabilities for %s: %w", pkg, err)
+	// not-found is decided before withdrawal, on what the feed actually
+	// returned. A package whose every record was later withdrawn is one the
+	// feed knows and has nothing to say about, which is clean; calling that
+	// not-found would put a measured package back in the unmeasured bucket.
+	if len(results[0].Vulns) == 0 {
+		reason := fmt.Sprintf("the feed carries no record for %s in %s, so nothing was measured", pkg, osvEco)
+		h.warn("%s %s: %s", ecosystem, pkg, reason)
+
+		for _, v := range versions {
+			out[v] = regtypes.Answer{Outcome: regtypes.OutcomeNotFound, Reason: reason}
+		}
+
+		return out, digestOf([]string{pkg + " not-found"}), nil
 	}
 
-	if len(out.Results) != len(versions) {
-		return nil, "", fmt.Errorf("querying vulnerabilities for %s: %d results for %d versions",
-			pkg, len(out.Results), len(versions))
+	records, err := h.recordsOf(ctx, results[0])
+	if err != nil {
+		return nil, "", err
 	}
 
-	known := map[string]details{}
-	byVersion := make(map[string][]regtypes.Vuln, len(versions))
 	snapshot := make([]string, 0, len(versions))
 
 	for i, version := range versions {
-		var vulns []regtypes.Vuln
+		vulns := h.match(records, osvEco, pkg, version)
 
 		// Every version answered gets a snapshot line, even a clean one.
 		// Without it a package with no vulnerabilities digests to the
-		// sha256 of nothing - which is also what a feed that was never
-		// asked digests to, so "clean" and "unmeasured" became the same
-		// record. They are not the same claim.
-		snapshot = append(snapshot, version+" queried")
+		// sha256 of nothing, which is also what a feed that was never
+		// asked digests to.
+		snapshot = append(snapshot, version+" queried "+strconv.Itoa(len(records))+" records")
 
-		for _, v := range out.Results[i].Vulns {
-			d, ok := known[v.ID]
-			if !ok {
-				var err error
+		for _, v := range vulns {
+			snapshot = append(snapshot, version+" "+v.ID+" "+string(v.Severity)+
+				" fixed="+strings.Join(v.FixedIn, ",")+
+				" imports="+strings.Join(v.AffectedImports, ","))
+		}
 
-				d, err = h.detailsOf(ctx, v.ID)
-				if err != nil {
-					return nil, "", err
-				}
+		h.reportDisagreement(ecosystem, pkg, version, results[i+1], vulns)
 
-				known[v.ID] = d
-			}
+		answer := regtypes.Answer{Outcome: regtypes.OutcomeClean, Vulns: vulns}
+		if len(vulns) > 0 {
+			answer.Outcome = regtypes.OutcomeFindings
+			answer.Reason = fmt.Sprintf("%d published range(s) cover %s", len(vulns), version)
+		} else {
+			answer.Reason = fmt.Sprintf(
+				"the feed carries %d record(s) for %s and none of their ranges cover %s",
+				len(records), pkg, version)
+		}
 
-			// A withdrawn record is one the feed took back. It is not an
-			// advisory any more and must not gate anything.
-			if d.withdrawn {
+		out[version] = answer
+	}
+
+	return out, digestOf(snapshot), nil
+}
+
+// reportDisagreement says out loud when our range walk and the feed's own
+// filter reach different answers. Neither side is silenced: the local answer
+// is the one used, and the difference is printed so we learn how often the
+// filter is wrong before deciding whether to keep sending it.
+func (h *HTTP) reportDisagreement(ecosystem, pkg, version string, feed batchResult, ours []regtypes.Vuln) {
+	theirs := map[string]bool{}
+	for _, v := range feed.Vulns {
+		theirs[v.ID] = true
+	}
+
+	mine := map[string]bool{}
+	for _, v := range ours {
+		mine[v.ID] = true
+	}
+
+	var extra, missing []string
+
+	for id := range theirs {
+		if !mine[id] {
+			extra = append(extra, id)
+		}
+	}
+
+	for id := range mine {
+		if !theirs[id] {
+			missing = append(missing, id)
+		}
+	}
+
+	sort.Strings(extra)
+	sort.Strings(missing)
+
+	if len(extra) > 0 {
+		h.warn("%s %s %s: the feed's own filter returned %s but no published range covers this version - ignoring it",
+			ecosystem, pkg, version, strings.Join(extra, ", "))
+	}
+
+	if len(missing) > 0 {
+		h.warn("%s %s %s: a published range covers this version for %s but the feed's own filter left it out - counting it",
+			ecosystem, pkg, version, strings.Join(missing, ", "))
+	}
+}
+
+// queryBatch runs one querybatch call and follows every page token it hands
+// back. Tokens arrive per result, not per response, so a second page asks
+// only about the queries that were truncated and the answers are merged back
+// into their original slots.
+func (h *HTTP) queryBatch(ctx context.Context, queries []batchQuery) ([]batchResult, error) {
+	merged := make([]batchResult, len(queries))
+
+	pending := make([]int, len(queries))
+	for i := range queries {
+		pending[i] = i
+	}
+
+	page := queries
+
+	for round := 0; len(pending) > 0; round++ {
+		if round >= maxPages {
+			return nil, fmt.Errorf("the feed kept paging past %d rounds", maxPages)
+		}
+
+		var out struct {
+			Results []batchResult `json:"results"`
+		}
+
+		if err := h.postJSON(ctx, h.base+"/v1/querybatch", map[string]any{"queries": page}, &out); err != nil {
+			return nil, err
+		}
+
+		if len(out.Results) != len(page) {
+			return nil, fmt.Errorf("the feed answered %d of %d queries", len(out.Results), len(page))
+		}
+
+		var (
+			next     []batchQuery
+			nextSlot []int
+		)
+
+		for i, r := range out.Results {
+			slot := pending[i]
+			merged[slot].Vulns = append(merged[slot].Vulns, r.Vulns...)
+
+			if r.NextPageToken == "" {
 				continue
 			}
 
-			vulns = append(vulns, regtypes.Vuln{
-				ID:              v.ID,
-				Severity:        d.severity,
-				Introduced:      d.introduced,
-				FixedIn:         d.fixed,
-				AffectedImports: d.imports,
-			})
-
-			snapshot = append(snapshot, version+" "+v.ID+" "+string(d.severity)+
-				" fixed="+strings.Join(d.fixed, ",")+
-				" imports="+strings.Join(d.imports, ","))
+			q := queries[slot]
+			q.PageToken = r.NextPageToken
+			next = append(next, q)
+			nextSlot = append(nextSlot, slot)
 		}
 
-		byVersion[version] = vulns
+		page, pending = next, nextSlot
 	}
 
-	return byVersion, digestOf(snapshot), nil
+	return merged, nil
 }
 
-// details is everything a consumer needs from one OSV record. The feed
-// answers a question about a package; whether a given consumer is affected
-// is a different question, answered later against that consumer's own
-// imports, so this reads facts and decides nothing.
-type details struct {
-	severity   regtypes.Severity
-	introduced []string
-	fixed      []string
-	imports    []string
-	withdrawn  bool
+// record is one OSV vulnerability, read whole.
+type record struct {
+	ID        string
+	Severity  regtypes.Severity
+	Withdrawn bool
+	Aliases   []string
+	Affected  []affected
 }
 
-// detailsOf reads one vulnerability record whole. Everything here was
-// discarded before: the range events that say whether a fix exists, and the
-// import paths that say what the advisory actually covers. Events are
-// unioned across every affected block, because a record commonly splits one
-// vulnerability across branches (a stdlib line and a module line, say) and
-// the fix a consumer needs may live in any of them.
-func (h *HTTP) detailsOf(ctx context.Context, id string) (details, error) {
+// affected is one affected block: a package, its ranges and its import scope.
+type affected struct {
+	Name      string
+	Ecosystem string
+	Versions  []string
+	Ranges    []versionRange
+	Imports   []string
+}
+
+type versionRange struct {
+	Type   string
+	Events []rangeEvent
+}
+
+type rangeEvent struct {
+	Introduced   string
+	Fixed        string
+	LastAffected string
+	Limit        string
+}
+
+// recordsOf fetches every record the package-wide query named, whole.
+func (h *HTTP) recordsOf(ctx context.Context, all batchResult) ([]record, error) {
+	seen := map[string]bool{}
+	out := make([]record, 0, len(all.Vulns))
+
+	for _, v := range all.Vulns {
+		if seen[v.ID] {
+			continue
+		}
+
+		seen[v.ID] = true
+
+		r, err := h.recordOf(ctx, v.ID, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		// A withdrawn record is one the feed took back. It is not an
+		// advisory any more and must not gate anything.
+		if r.Withdrawn {
+			continue
+		}
+
+		out = append(out, r)
+	}
+
+	return out, nil
+}
+
+// match decides, from the records themselves, which advisories cover one
+// version. This is the whole reason the package-wide query exists: the
+// answer comes from what the feed published, never from what it filtered.
+func (h *HTTP) match(records []record, osvEco, pkg, version string) []regtypes.Vuln {
+	var out []regtypes.Vuln
+
+	for _, r := range records {
+		for _, a := range r.Affected {
+			if a.Name != pkg || baseEcosystem(a.Ecosystem) != osvEco {
+				continue
+			}
+
+			covered, why := coversVersion(a, version)
+			if !covered {
+				continue
+			}
+
+			out = append(out, vulnOf(r, a, why))
+
+			break
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+
+	return out
+}
+
+// vulnOf folds one matched record into the finding a consumer reads.
+//
+// Everything comes from the affected block that matched, never from the
+// record as a whole. One record routinely covers several packages: the
+// golang.org/x/net advisories carry a block for the module and another for
+// the Go standard library, each with its own ranges and its own import
+// scope. Unioning them reports the stdlib's fixed Go version as a fix for
+// the module, and tells a consumer that importing net/http puts them inside
+// a golang.org/x/net advisory. Both are wrong, and both look plausible.
+func vulnOf(r record, a affected, why string) regtypes.Vuln {
+	introduced := map[string]bool{}
+	fixed := map[string]bool{}
+	last := map[string]bool{}
+
+	for _, vr := range a.Ranges {
+		for _, e := range vr.Events {
+			if e.Introduced != "" {
+				introduced[e.Introduced] = true
+			}
+
+			if e.Fixed != "" {
+				fixed[e.Fixed] = true
+			}
+
+			if e.LastAffected != "" {
+				last[e.LastAffected] = true
+			}
+		}
+	}
+
+	paths := map[string]bool{}
+	for _, p := range a.Imports {
+		paths[p] = true
+	}
+
+	return regtypes.Vuln{
+		ID:              r.ID,
+		Severity:        r.Severity,
+		Introduced:      sortedKeys(introduced),
+		FixedIn:         sortedKeys(fixed),
+		LastAffected:    sortedKeys(last),
+		AffectedImports: sortedKeys(paths),
+		MatchedRange:    why,
+	}
+}
+
+// coversVersion walks one affected block the way OSV defines it. An explicit
+// versions list is an exact membership test. A range is a walk over events in
+// published order, each one opening or closing the affected window.
+//
+// GIT ranges are skipped: they are commit hashes, and comparing a semver
+// against a sha answers nothing.
+func coversVersion(a affected, version string) (bool, string) {
+	for _, v := range a.Versions {
+		if regtypes.CompareVersions(v, version) == 0 {
+			return true, "listed explicitly in affected.versions"
+		}
+	}
+
+	for _, vr := range a.Ranges {
+		if vr.Type == "GIT" {
+			continue
+		}
+
+		inside := false
+		why := ""
+
+		for _, e := range vr.Events {
+			switch {
+			case e.Introduced != "":
+				// "0" means from the beginning of time.
+				if e.Introduced == "0" || regtypes.CompareVersions(version, e.Introduced) >= 0 {
+					inside = true
+					why = "introduced " + e.Introduced
+				}
+			case e.Fixed != "":
+				if regtypes.CompareVersions(version, e.Fixed) >= 0 {
+					inside = false
+				} else if inside {
+					why += ", fixed in " + e.Fixed
+				}
+			case e.LastAffected != "":
+				if regtypes.CompareVersions(version, e.LastAffected) > 0 {
+					inside = false
+				} else if inside {
+					why += ", last affected " + e.LastAffected
+				}
+			case e.Limit != "":
+				if regtypes.CompareVersions(version, e.Limit) >= 0 {
+					inside = false
+				}
+			}
+		}
+
+		if inside {
+			return true, why
+		}
+	}
+
+	return false, ""
+}
+
+// baseEcosystem drops the suffix an ecosystem may carry. OSV writes
+// "Debian:11" and "Alpine:v3.18"; the part before the colon is the ecosystem.
+func baseEcosystem(name string) string {
+	base, _, _ := strings.Cut(name, ":")
+
+	return base
+}
+
+// recordOf reads one vulnerability whole.
+//
+// Severity is resolved in three steps because no single field carries it.
+// Measured over 138 real records: the database's own word covers 56%, a CVSS
+// vector covers a further 6%, and 38% publish neither - of which 43 of 53
+// name an alias that does. So the word is preferred, then the vector, then
+// the aliases, and only after all three does severity stay unknown.
+//
+// depth guards the alias hop: one hop, never a cycle.
+func (h *HTTP) recordOf(ctx context.Context, id string, depth int) (record, error) {
 	var body struct {
-		Withdrawn        string `json:"withdrawn"`
+		ID               string   `json:"id"`
+		Withdrawn        string   `json:"withdrawn"`
+		Aliases          []string `json:"aliases"`
 		DatabaseSpecific struct {
 			Severity string `json:"severity"`
 		} `json:"database_specific"`
+		Severity []struct {
+			Type  string `json:"type"`
+			Score string `json:"score"`
+		} `json:"severity"`
 		Affected []struct {
-			Ranges []struct {
+			Package struct {
+				Name      string `json:"name"`
+				Ecosystem string `json:"ecosystem"`
+			} `json:"package"`
+			Versions []string `json:"versions"`
+			Ranges   []struct {
+				Type   string `json:"type"`
 				Events []struct {
 					Introduced   string `json:"introduced"`
 					Fixed        string `json:"fixed"`
 					LastAffected string `json:"last_affected"`
+					Limit        string `json:"limit"`
 				} `json:"events"`
 			} `json:"ranges"`
 			EcosystemSpecific struct {
@@ -191,63 +577,75 @@ func (h *HTTP) detailsOf(ctx context.Context, id string) (details, error) {
 		} `json:"affected"`
 	}
 
-	raw, err := h.getJSON(ctx, h.base+"/v1/vulns/"+id, id, &body)
-	if err != nil {
-		return details{}, err
+	if err := h.getJSON(ctx, h.base+"/v1/vulns/"+id, id, &body); err != nil {
+		return record{}, err
 	}
 
-	_ = raw
+	out := record{ID: id, Withdrawn: body.Withdrawn != "", Aliases: body.Aliases}
 
-	out := details{severity: severityFrom(body.DatabaseSpecific.Severity), withdrawn: body.Withdrawn != ""}
+	out.Severity = severityOfWord(body.DatabaseSpecific.Severity)
 
-	introduced := map[string]bool{}
-	fixed := map[string]bool{}
-	paths := map[string]bool{}
+	if out.Severity == "" {
+		for _, s := range body.Severity {
+			if sev, ok := severityOfVector(s.Type, s.Score); ok {
+				out.Severity = sev
 
-	for _, affected := range body.Affected {
-		for _, r := range affected.Ranges {
+				break
+			}
+		}
+	}
+
+	for _, a := range body.Affected {
+		block := affected{
+			Name:      a.Package.Name,
+			Ecosystem: a.Package.Ecosystem,
+			Versions:  a.Versions,
+		}
+
+		for _, r := range a.Ranges {
+			vr := versionRange{Type: r.Type}
 			for _, e := range r.Events {
-				if e.Introduced != "" {
-					introduced[e.Introduced] = true
-				}
-
-				// last_affected closes a range without naming a fix, so it
-				// is deliberately not folded in here: a version that ends
-				// the affected range is not a version that fixes anything.
-				if e.Fixed != "" {
-					fixed[e.Fixed] = true
-				}
+				vr.Events = append(vr.Events, rangeEvent{
+					Introduced:   e.Introduced,
+					Fixed:        e.Fixed,
+					LastAffected: e.LastAffected,
+					Limit:        e.Limit,
+				})
 			}
+
+			block.Ranges = append(block.Ranges, vr)
 		}
 
-		for _, imp := range affected.EcosystemSpecific.Imports {
+		for _, imp := range a.EcosystemSpecific.Imports {
 			if imp.Path != "" {
-				paths[imp.Path] = true
+				block.Imports = append(block.Imports, imp.Path)
 			}
 		}
+
+		out.Affected = append(out.Affected, block)
 	}
 
-	out.introduced = sortedKeys(introduced)
-	out.fixed = sortedKeys(fixed)
-	out.imports = sortedKeys(paths)
+	if out.Severity == "" && depth == 0 {
+		out.Severity = h.severityFromAliases(ctx, body.Aliases)
+	}
 
 	return out, nil
 }
 
-// severityFrom maps OSV's word to ours. A word the feed does not publish
-// stays empty, and empty counts as high downstream - conservative by
-// decision, and the emptiness is preserved rather than invented so a
-// consumer can tell "unknown" from "low".
-func severityFrom(word string) regtypes.Severity {
-	switch word {
-	case "CRITICAL":
-		return regtypes.SeverityCritical
-	case "HIGH":
-		return regtypes.SeverityHigh
-	case "MODERATE", "MEDIUM":
-		return regtypes.SeverityMedium
-	case "LOW":
-		return regtypes.SeverityLow
+// severityFromAliases asks the records this one is an alias of. A Go or
+// PyPI advisory routinely publishes no severity while the GitHub record it
+// aliases publishes one for the same vulnerability.
+func (h *HTTP) severityFromAliases(ctx context.Context, aliases []string) regtypes.Severity {
+	for _, alias := range aliases {
+		other, err := h.recordOf(ctx, alias, 1)
+		if err != nil {
+			// An alias we cannot read is not a failure of this record.
+			continue
+		}
+
+		if other.Severity != "" {
+			return other.Severity
+		}
 	}
 
 	return ""
@@ -268,32 +666,34 @@ func sortedKeys(set map[string]bool) []string {
 	return out
 }
 
-func (h *HTTP) getJSON(ctx context.Context, u, what string, out any) ([]byte, error) {
+func (h *HTTP) getJSON(ctx context.Context, u, what string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return nil, fmt.Errorf("building request for %s: %w", what, err)
+		return fmt.Errorf("building request for %s: %w", what, err)
 	}
+
+	req.Header.Set("User-Agent", userAgent)
 
 	res, err := h.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("reading vulnerability %s: %w", what, err)
+		return fmt.Errorf("reading vulnerability %s: %w", what, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("reading vulnerability %s: status %d", what, res.StatusCode)
+		return fmt.Errorf("reading vulnerability %s: status %d", what, res.StatusCode)
 	}
 
 	raw, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, fmt.Errorf("reading vulnerability %s: %w", what, err)
+		return fmt.Errorf("reading vulnerability %s: %w", what, err)
 	}
 
 	if err := json.Unmarshal(raw, out); err != nil {
-		return nil, fmt.Errorf("decoding vulnerability %s: %w", what, err)
+		return fmt.Errorf("decoding vulnerability %s: %w", what, err)
 	}
 
-	return raw, nil
+	return nil
 }
 
 func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
@@ -308,6 +708,7 @@ func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 
 	res, err := h.client.Do(req)
 	if err != nil {
@@ -332,22 +733,15 @@ func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
 }
 
 // digestOf canonicalises the snapshot lines so the digest is stable whatever
-// order the feed answered in.
+// order the feed answered in. An empty snapshot digests to the sha256 of
+// nothing, which is exactly what a record that was never measured should
+// carry - and why the outcome is stored beside it rather than inferred.
 func digestOf(lines []string) string {
 	sorted := make([]string, len(lines))
 	copy(sorted, lines)
 	sort.Strings(sorted)
 
-	sum := sha256.Sum256([]byte(joinLines(sorted)))
+	sum := sha256.Sum256([]byte(strings.Join(sorted, "\n")))
 
 	return "sha256:" + hex.EncodeToString(sum[:8])
-}
-
-func joinLines(lines []string) string {
-	out := ""
-	for _, l := range lines {
-		out += l + "\n"
-	}
-
-	return out
 }

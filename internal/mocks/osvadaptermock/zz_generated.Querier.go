@@ -39,24 +39,24 @@ func (_m *MockQuerier) EXPECT() *MockQuerier_Expecter {
 }
 
 // Vulns provides a mock function for the type MockQuerier
-func (_mock *MockQuerier) Vulns(ctx context.Context, ecosystem string, pkg string, versions []string) (map[string][]regtypes.Vuln, string, error) {
+func (_mock *MockQuerier) Vulns(ctx context.Context, ecosystem string, pkg string, versions []string) (map[string]regtypes.Answer, string, error) {
 	ret := _mock.Called(ctx, ecosystem, pkg, versions)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Vulns")
 	}
 
-	var r0 map[string][]regtypes.Vuln
+	var r0 map[string]regtypes.Answer
 	var r1 string
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, []string) (map[string][]regtypes.Vuln, string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, []string) (map[string]regtypes.Answer, string, error)); ok {
 		return returnFunc(ctx, ecosystem, pkg, versions)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, []string) map[string][]regtypes.Vuln); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, []string) map[string]regtypes.Answer); ok {
 		r0 = returnFunc(ctx, ecosystem, pkg, versions)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string][]regtypes.Vuln)
+			r0 = ret.Get(0).(map[string]regtypes.Answer)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, []string) string); ok {
@@ -114,12 +114,12 @@ func (_c *MockQuerier_Vulns_Call) Run(run func(ctx context.Context, ecosystem st
 	return _c
 }
 
-func (_c *MockQuerier_Vulns_Call) Return(stringToVulns map[string][]regtypes.Vuln, s string, err error) *MockQuerier_Vulns_Call {
-	_c.Call.Return(stringToVulns, s, err)
+func (_c *MockQuerier_Vulns_Call) Return(stringToAnswer map[string]regtypes.Answer, s string, err error) *MockQuerier_Vulns_Call {
+	_c.Call.Return(stringToAnswer, s, err)
 	return _c
 }
 
-func (_c *MockQuerier_Vulns_Call) RunAndReturn(run func(ctx context.Context, ecosystem string, pkg string, versions []string) (map[string][]regtypes.Vuln, string, error)) *MockQuerier_Vulns_Call {
+func (_c *MockQuerier_Vulns_Call) RunAndReturn(run func(ctx context.Context, ecosystem string, pkg string, versions []string) (map[string]regtypes.Answer, string, error)) *MockQuerier_Vulns_Call {
 	_c.Call.Return(run)
 	return _c
 }

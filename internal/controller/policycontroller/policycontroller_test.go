@@ -32,7 +32,7 @@ func candidate(version string, releasedDaysAgo int, vulns regtypes.Vector) regty
 func track(prefix, current string, currentVulns regtypes.Vector) regtypes.Track {
 	return regtypes.Track{
 		Package: "example.com/pkg", Ecosystem: "go", Prefix: prefix, Current: current,
-		History: []regtypes.Entry{{Version: current, Vulns: currentVulns}},
+		Vulns: currentVulns,
 	}
 }
 

@@ -147,9 +147,9 @@ func TestRegisterRecordsRideTheRealEngine(t *testing.T) {
 	track := regtypes.Track{
 		Package: "github.com/example/pkg", Ecosystem: "go", Prefix: "1",
 		Current: "1.2.0", UpdatedAt: at,
-		History: []regtypes.Entry{{
-			Version: "1.2.0", ReleasedAt: at, AdoptedAt: at, OSVSnapshot: "sha256:snap",
-		}},
+		ReleasedAt: at, AdoptedAt: at, OSVSnapshot: "sha256:snap",
+		Outcome: regtypes.OutcomeClean,
+		Reason:  "the feed carries 3 record(s) for github.com/example/pkg and none of their ranges cover 1.2.0",
 	}
 
 	require.NoError(t, store.PutTrack(ctx, track))

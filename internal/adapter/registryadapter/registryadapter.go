@@ -184,11 +184,22 @@ func (h *HTTP) npmVersions(ctx context.Context, pkg string) ([]regtypes.Candidat
 	return out, nil
 }
 
+// userAgent identifies us to every registry we read.
+//
+// crates.io answers 403 to a request that does not send one. That 403 was
+// read as "the network blocks crates.io", which is how this repo grew a local
+// stand-in translating the sparse index into the API shape, and how rust
+// entries ended up with no release dates. One header, and the real API
+// answers 200.
+const userAgent = "forge-register (+https://github.com/alexandremahdhaoui/forge-register)"
+
 func (h *HTTP) get(ctx context.Context, u string, raw *[]byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return fmt.Errorf("building request for %s: %w", u, err)
 	}
+
+	req.Header.Set("User-Agent", userAgent)
 
 	res, err := h.client.Do(req)
 	if err != nil {

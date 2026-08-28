@@ -61,7 +61,13 @@ func build(cfg config.Register) (*registercontroller.Controller, storeadapter.St
 		PyPI:    cfg.Registries.PyPI,
 		NPM:     cfg.Registries.NPM,
 	})
-	osv := osvadapter.New(http.DefaultClient, cfg.OSV.Base)
+	// Warnings go to stderr, never stdout: stdout is the JSON-RPC transport
+	// when a command runs as an MCP engine. A feed that answered nothing has
+	// to be said out loud, and saying it down the wire breaks the protocol.
+	osv := osvadapter.New(http.DefaultClient, cfg.OSV.Base,
+		osvadapter.WithWarner(func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "WARN "+format+"\n", args...)
+		}))
 
 	controller := registercontroller.New(
 		store,

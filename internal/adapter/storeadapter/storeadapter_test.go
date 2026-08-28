@@ -89,10 +89,11 @@ func TestATrackRoundTripsThroughTheWire(t *testing.T) {
 	at := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
 	track := regtypes.Track{
 		Package: "serde", Ecosystem: "rust", Prefix: "1", Current: "1.0.221", UpdatedAt: at,
-		History: []regtypes.Entry{{
-			Version: "1.0.221", ReleasedAt: at, AdoptedAt: at,
-			Vulns: regtypes.Vector{Low: 1}, OSVSnapshot: "sha256:2f7a",
-		}},
+		ReleasedAt: at, AdoptedAt: at,
+		Vulns:       regtypes.Vector{Low: 1},
+		Outcome:     regtypes.OutcomeFindings,
+		Reason:      "1 published range(s) cover 1.0.221",
+		OSVSnapshot: "sha256:2f7a",
 		Advisory: &regtypes.Advisory{
 			VulnIDs: []string{"RUSTSEC-1"}, Severity: regtypes.SeverityLow, Since: at,
 		},

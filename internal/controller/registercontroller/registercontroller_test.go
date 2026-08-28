@@ -54,7 +54,6 @@ func TestEvaluateAdvancesATrackAndWritesTheVerdict(t *testing.T) {
 
 	track := regtypes.Track{
 		Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "1.0.0",
-		History: []regtypes.Entry{{Version: "1.0.0"}},
 	}
 
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
@@ -76,8 +75,8 @@ func TestEvaluateAdvancesATrackAndWritesTheVerdict(t *testing.T) {
 	require.Equal(t, 1, report.Adopted)
 
 	require.Equal(t, "1.1.0", written.Current)
-	require.Len(t, written.History, 2)
-	require.Equal(t, "sha256:snap", written.History[1].OSVSnapshot)
+	require.Equal(t, "sha256:snap", written.OSVSnapshot)
+	require.Equal(t, days(30), written.ReleasedAt)
 
 	require.Equal(t, regtypes.VerdictAdopted, verdict.Code)
 	require.Equal(t, "sha256:snap", verdict.OSVSnapshot)
@@ -116,6 +115,7 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 			{
 				Version: "1.1.0", ReleasedAt: days(90),
 				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"CVE-9"},
+				Outcome: regtypes.OutcomeFindings,
 			},
 		}, "sha256:snap", nil).Once()
 
@@ -138,8 +138,9 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 			{
 				Version: "1.1.0", ReleasedAt: days(90),
 				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"CVE-9"},
+				Outcome: regtypes.OutcomeFindings,
 			},
-			{Version: "1.1.1", ReleasedAt: days(0)},
+			{Version: "1.1.1", ReleasedAt: days(0), Outcome: regtypes.OutcomeClean},
 		}, "sha256:snap2", nil).Once()
 
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
@@ -268,7 +269,8 @@ func TestPublishIsTheProofDoor(t *testing.T) {
 	require.Contains(t, kv.Verdict.Message, "213ecaf37e78")
 
 	require.Equal(t, "0.3.0", written.Current)
-	require.Equal(t, "213ecaf37e78", written.History[0].Provenance)
+	require.Equal(t, "213ecaf37e78", written.Provenance)
+	require.Equal(t, "git@github.com:example/spec.git", written.Source)
 }
 
 func TestPublishOfAnOlderVersionMovesNothing(t *testing.T) {
@@ -301,7 +303,7 @@ func TestAnAdvisoryNamesItsHighestSeverity(t *testing.T) {
 		h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
 		h.discovery.EXPECT().Discover(mock.Anything, "go", "p").
 			Return([]regtypes.Candidate{
-				{Version: "1.0.0", ReleasedAt: days(90), Vulns: tc.vector, VulnIDs: []string{"V"}},
+				{Version: "1.0.0", ReleasedAt: days(90), Vulns: tc.vector, VulnIDs: []string{"V"}, Outcome: regtypes.OutcomeFindings},
 			}, "s", nil).Once()
 
 		var written regtypes.Track
@@ -375,66 +377,63 @@ func TestAFeedFailureHidesNoOtherTrack(t *testing.T) {
 // improves: the fast-adopt the policy always had, now reachable for
 // versions that entered by proof. Only the pointer moves - a second
 // history entry would shadow the provenance the published one carries.
-func TestAnInternalTrackFastAdoptsAPublishedFix(t *testing.T) {
+// An internal track weighs exactly one candidate: the version it is on.
+//
+// This replaces a test that handed the policy a track sitting on an old
+// version with a newer, fixed one behind it in history. Publish cannot write
+// that state - it moves current forward whenever it accepts a version - and
+// the history array was the only thing that made the shape constructible. The
+// test passed and the path it covered was unreachable.
+func TestAnInternalTrackWeighsOnlyTheVersionItIsOn(t *testing.T) {
 	h := newHarness(t)
-
-	vulnerable := regtypes.Entry{
-		Version: "v0.1.0-dev.r00000001.gaaaaaaaaaaaa", ReleasedAt: days(30),
-		Provenance: "aaaaaaaaaaaa",
-	}
-	fixed := regtypes.Entry{
-		Version: "v0.1.0-dev.r00000002.gbbbbbbbbbbbb", ReleasedAt: days(1),
-		Provenance: "bbbbbbbbbbbb",
-	}
 
 	track := regtypes.Track{
 		Package: "example.com/toolchain-member", Ecosystem: "internal", Prefix: "0",
-		Current: vulnerable.Version,
-		History: []regtypes.Entry{vulnerable, fixed},
+		Current:    "v0.1.0-dev.r00000002.gbbbbbbbbbbbb",
+		ReleasedAt: days(1),
+		Provenance: "bbbbbbbbbbbb",
+		Outcome:    regtypes.OutcomeClean,
 	}
 
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+
+	var offered []regtypes.Candidate
+
 	h.discovery.EXPECT().Refresh(mock.Anything, "internal", "example.com/toolchain-member", mock.Anything).
-		Return([]regtypes.Candidate{
-			{Version: vulnerable.Version, ReleasedAt: days(30), Vulns: regtypes.Vector{High: 1}},
-			{Version: fixed.Version, ReleasedAt: days(1), Vulns: regtypes.Vector{}},
-		}, "sha256:snap", nil).Once()
+		RunAndReturn(func(_ context.Context, _, _ string, published []regtypes.Candidate) ([]regtypes.Candidate, string, error) {
+			offered = published
 
-	var written regtypes.Track
+			return []regtypes.Candidate{{
+				Version: track.Current, ReleasedAt: days(1), Outcome: regtypes.OutcomeClean,
+			}}, "sha256:snap", nil
+		}).Once()
 
-	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
-		Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
-	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	h.store.EXPECT().PutVerdict(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
 
-	report, err := h.c.Evaluate(context.Background(), now)
+	_, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
-	require.Equal(t, 1, report.Adopted)
-	require.Contains(t, report.Verdicts[0].Verdict.Message, "security upgrade")
-	require.Contains(t, report.Verdicts[0].Verdict.Message, "quarantine waived")
 
-	require.Equal(t, fixed.Version, written.Current)
-	require.Len(t, written.History, 2, "adoption moves the pointer, never duplicates history")
-	require.Equal(t, "bbbbbbbbbbbb", written.History[1].Provenance,
-		"the published entry keeps its provenance")
-	require.Nil(t, written.Advisory, "the adopted version is clean")
+	require.Len(t, offered, 1)
+	require.Equal(t, track.Current, offered[0].Version)
+	require.Equal(t, days(1), offered[0].ReleasedAt)
 }
 
-// A fresh disclosure on an internal current raises the advisory - the loud
-// signal every consumer sync trips over, pins notwithstanding.
 func TestAnInternalDisclosureRaisesTheAdvisory(t *testing.T) {
 	h := newHarness(t)
 
-	entry := regtypes.Entry{Version: "v0.1.0-dev.r00000001.gaaaaaaaaaaaa", ReleasedAt: days(30)}
+	const version = "v0.1.0-dev.r00000001.gaaaaaaaaaaaa"
+
 	track := regtypes.Track{
 		Package: "example.com/toolchain-member", Ecosystem: "internal", Prefix: "0",
-		Current: entry.Version, History: []regtypes.Entry{entry},
+		Current: version, ReleasedAt: days(30),
 	}
 
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
 	h.discovery.EXPECT().Refresh(mock.Anything, "internal", "example.com/toolchain-member", mock.Anything).
 		Return([]regtypes.Candidate{
-			{Version: entry.Version, ReleasedAt: days(30),
-				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"GHSA-xxxx"}},
+			{Version: version, ReleasedAt: days(30),
+				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"GHSA-xxxx"}, Outcome: regtypes.OutcomeFindings},
 		}, "sha256:snap", nil).Once()
 
 	var written regtypes.Track
@@ -457,7 +456,6 @@ func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 	// the track must not deprecate as stale.
 	track := regtypes.Track{
 		Package: "httpx", Ecosystem: "python", Prefix: "0", Current: "0.28.1",
-		History: []regtypes.Entry{{Version: "0.28.1"}},
 	}
 
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()

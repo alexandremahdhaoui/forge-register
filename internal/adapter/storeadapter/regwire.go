@@ -2,6 +2,7 @@ package storeadapter
 
 import (
 	"encoding/json"
+	"time"
 
 	spec "github.com/alexandremahdhaoui/forge-register-spec/pkg/registertypes"
 
@@ -21,14 +22,14 @@ func trackToWire(t regtypes.Track) spec.Track {
 		UpdatedAt: t.UpdatedAt,
 	}
 
-	if len(t.History) > 0 {
-		history := make([]spec.VersionEntry, 0, len(t.History))
-		for _, e := range t.History {
-			history = append(history, entryToWire(e))
-		}
-
-		wire.History = &history
-	}
+	wire.Vulns = vectorToWire(t.Vulns)
+	wire.Outcome = spec.Outcome(t.Outcome)
+	wire.Reason = orNil(t.Reason)
+	wire.Source = orNil(t.Source)
+	wire.Provenance = orNil(t.Provenance)
+	wire.OsvSnapshot = orNil(t.OSVSnapshot)
+	wire.ReleasedAt = orNilTime(t.ReleasedAt)
+	wire.AdoptedAt = orNilTime(t.AdoptedAt)
 
 	if t.Advisory != nil {
 		wire.Advisory = &spec.Advisory{
@@ -50,19 +51,22 @@ func trackToWire(t regtypes.Track) spec.Track {
 	return wire
 }
 
-func entryToWire(e regtypes.Entry) spec.VersionEntry {
-	wire := spec.VersionEntry{
-		Version:    e.Version,
-		ReleasedAt: e.ReleasedAt,
-		AdoptedAt:  e.AdoptedAt,
-		Vulns:      vectorToWire(e.Vulns),
+// orNilTime keeps a never-set timestamp out of the file entirely. A zero
+// time written as 0001-01-01 reads like a real date to anyone scanning.
+func orNilTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
 	}
 
-	wire.Source = orNil(e.Source)
-	wire.Provenance = orNil(e.Provenance)
-	wire.OsvSnapshot = orNil(e.OSVSnapshot)
+	return &t
+}
 
-	return wire
+func orTime(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+
+	return *t
 }
 
 func trackFromWire(payload []byte) (regtypes.Track, error) {
@@ -79,19 +83,14 @@ func trackFromWire(payload []byte) (regtypes.Track, error) {
 		UpdatedAt: wire.UpdatedAt,
 	}
 
-	if wire.History != nil {
-		for _, e := range *wire.History {
-			track.History = append(track.History, regtypes.Entry{
-				Version:     e.Version,
-				ReleasedAt:  e.ReleasedAt,
-				AdoptedAt:   e.AdoptedAt,
-				Vulns:       vectorFromWire(e.Vulns),
-				Source:      orEmptyString(e.Source),
-				Provenance:  orEmptyString(e.Provenance),
-				OSVSnapshot: orEmptyString(e.OsvSnapshot),
-			})
-		}
-	}
+	track.Vulns = vectorFromWire(wire.Vulns)
+	track.Outcome = regtypes.Outcome(wire.Outcome)
+	track.Reason = orEmptyString(wire.Reason)
+	track.Source = orEmptyString(wire.Source)
+	track.Provenance = orEmptyString(wire.Provenance)
+	track.OSVSnapshot = orEmptyString(wire.OsvSnapshot)
+	track.ReleasedAt = orTime(wire.ReleasedAt)
+	track.AdoptedAt = orTime(wire.AdoptedAt)
 
 	if wire.Advisory != nil {
 		track.Advisory = &regtypes.Advisory{
