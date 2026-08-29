@@ -73,13 +73,13 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 		verdict := policycontroller.EvaluateUpgrade(track, candidates, now, c.params)
 		verdict.OSVSnapshot = snapshot
 
-		for _, cand := range candidates {
-			if cand.Version == track.Current && !(regtypes.Answer{Outcome: cand.Outcome}).Measured() {
-				report.Unmeasured = append(report.Unmeasured,
-					fmt.Sprintf("%s:%s %s: %s", track.Ecosystem, track.Package, cand.Outcome, cand.Reason))
+		landing := track.Current
+		if landing == "" {
+			landing = verdict.Adopted
+		}
 
-				break
-			}
+		if note := unmeasuredNote(track, candidates, landing); note != "" {
+			report.Unmeasured = append(report.Unmeasured, note)
 		}
 
 		if verdict.Code == regtypes.VerdictAdopted {
@@ -132,6 +132,60 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 // current forward, so nothing behind it was ever adoptable, and reaching
 // back through a history array to re-offer them was weighing versions the
 // policy would refuse anyway.
+// unmeasuredNote answers the line a run owes an operator when the version a
+// track lands on was never checked.
+//
+// A track that already has a current version lands on it, so that version
+// decides. A track admitted this run has none: it lands on what the verdict
+// adopts, and when policy adopts nothing - held in quarantine, held on a
+// worse vector - it lands nowhere at all. That last case still owes a line,
+// because a package the register knows nothing measured about is precisely
+// what this field exists to surface.
+//
+// Keying on the current version alone reported nothing for either of the
+// two new-track cases, which is the shape of the bug this replaces: a run
+// that measured nothing reading as a run that found nothing.
+func unmeasuredNote(track regtypes.Track, candidates []regtypes.Candidate, landing string) string {
+	if landing != "" {
+		for _, cand := range candidates {
+			if cand.Version == landing && !measured(cand) {
+				return unmeasuredLine(track, cand)
+			}
+		}
+
+		return ""
+	}
+
+	// Nothing landed. One measured candidate is enough to say the feed
+	// answered about this package, so only a track where nothing was
+	// measured is blind.
+	var first *regtypes.Candidate
+
+	for i, cand := range candidates {
+		if measured(cand) {
+			return ""
+		}
+
+		if first == nil {
+			first = &candidates[i]
+		}
+	}
+
+	if first == nil {
+		return ""
+	}
+
+	return unmeasuredLine(track, *first)
+}
+
+func measured(cand regtypes.Candidate) bool {
+	return (regtypes.Answer{Outcome: cand.Outcome}).Measured()
+}
+
+func unmeasuredLine(track regtypes.Track, cand regtypes.Candidate) string {
+	return fmt.Sprintf("%s:%s %s: %s", track.Ecosystem, track.Package, cand.Outcome, cand.Reason)
+}
+
 func (c *Controller) candidatesFor(ctx context.Context, track regtypes.Track) ([]regtypes.Candidate, string, error) {
 	if track.Ecosystem != "internal" {
 		return c.discovery.Discover(ctx, track.Ecosystem, track.Package)

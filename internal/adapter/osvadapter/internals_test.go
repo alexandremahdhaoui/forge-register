@@ -119,33 +119,49 @@ func TestCVSSScoringMatchesTheSpecification(t *testing.T) {
 		why    string
 	}{
 		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", regtypes.SeverityCritical, "9.8"},
-		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", regtypes.SeverityCritical,
-			"10.0: the scope multiplier is what takes it there"},
-		{"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N", regtypes.SeverityMedium,
-			"6.4 under changed scope, where the privileges table differs"},
+		{
+			"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", regtypes.SeverityCritical,
+			"10.0: the scope multiplier is what takes it there",
+		},
+		{
+			"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N", regtypes.SeverityMedium,
+			"6.4 under changed scope, where the privileges table differs",
+		},
 		{"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N", regtypes.SeverityMedium, "5.4"},
 		{"CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:U/C:L/I:N/A:N", regtypes.SeverityLow, "1.8"},
-		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N", regtypes.SeverityLow,
-			"no impact at all scores zero"},
+		{
+			"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N", regtypes.SeverityLow,
+			"no impact at all scores zero",
+		},
 		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", regtypes.SeverityHigh, "7.5"},
 		// The other two band edges. Only 9.0 was pinned, so moving high to
 		// 7.5 or medium to 4.5 changed nothing any test could see - and a
 		// score landing exactly on a boundary is the one place a consumer
 		// most needs the answer to be the published one.
-		{"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L", regtypes.SeverityHigh,
-			"exactly 7.0, the low edge of high"},
-		{"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:N/A:N", regtypes.SeverityMedium,
-			"exactly 4.0, the low edge of medium"},
+		{
+			"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L", regtypes.SeverityHigh,
+			"exactly 7.0, the low edge of high",
+		},
+		{
+			"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:N/A:N", regtypes.SeverityMedium,
+			"exactly 4.0, the low edge of medium",
+		},
 
 		// The three below sit on a band edge and each isolates one rule.
 		// Every one of them was scored a whole band low before, and no
 		// vector in the captured set is close enough to notice.
-		{"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N", regtypes.SeverityCritical,
-			"9.3 with the scope multiplier, 8.7 without it"},
-		{"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:L", regtypes.SeverityCritical,
-			"9.1 with the changed-scope privileges table, 8.8 with the unchanged one"},
-		{"CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:L", regtypes.SeverityCritical,
-			"9.0 rounding up as CVSS requires, 8.9 rounding to nearest"},
+		{
+			"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:L/A:N", regtypes.SeverityCritical,
+			"9.3 with the scope multiplier, 8.7 without it",
+		},
+		{
+			"CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:L/A:L", regtypes.SeverityCritical,
+			"9.1 with the changed-scope privileges table, 8.8 with the unchanged one",
+		},
+		{
+			"CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:L", regtypes.SeverityCritical,
+			"9.0 rounding up as CVSS requires, 8.9 rounding to nearest",
+		},
 	} {
 		t.Run(tc.why, func(t *testing.T) {
 			got, ok := severityOfVector("CVSS_V3", tc.vector)
@@ -439,4 +455,108 @@ func TestAnOutageStillReadsAsAnOutage(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, answers["v1.0.0"].Reason, "could not be reached")
 	require.Contains(t, answers["v1.0.0"].Reason, "upstream is down")
+}
+
+// TestARefusedRecordIsNotAnOutage covers the second endpoint.
+//
+// The batch endpoint got the refusal split and the record endpoint did not.
+// It returned a bare status line that carried no refusal marker and no
+// message from the feed, so a 4xx on a single record still read as "could
+// not be read" - the same defect the batch fix removed, one function over.
+func TestARefusedRecordIsNotAnOutage(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"results":[{"vulns":[{"id":"X-1"}]},{"vulns":[]}]}`)
+	})
+	mux.HandleFunc("/v1/vulns/X-1", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"code":3,"message":"malformed id"}`)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	answers, _, err := New(nil, srv.URL).
+		Vulns(context.Background(), "go", "p", []string{"v1.0.0"})
+	require.NoError(t, err)
+
+	got := answers["v1.0.0"]
+	require.Equal(t, regtypes.OutcomeUnreachable, got.Outcome,
+		"nothing was measured either way, so it still does not block")
+	require.Contains(t, got.Reason, "refused the request",
+		"a refusal reads differently from an outage, whichever endpoint refused")
+	require.Contains(t, got.Reason, "malformed id",
+		"and it carries the feed's own words")
+}
+
+// TestEveryVersionGetsItsOwnAnswerAcrossChunks drives the arithmetic the
+// chunking test above cannot see.
+//
+// That test asserts chunk sizes with a feed that answers the same empty
+// record to every query, so all 2500 versions land on one identical answer
+// and a stitch that scrambled the order would pass unchanged. Here the feed
+// answers per version, so an answer landing on the wrong version fails.
+//
+// The boundary is deliberate: the vulnerable version sits at index 1000,
+// the first slot of the second chunk, which is where an off-by-one in the
+// merge would put someone else's answer.
+func TestEveryVersionGetsItsOwnAnswerAcrossChunks(t *testing.T) {
+	const (
+		versions = 2500
+		affected = 1000
+	)
+
+	list := make([]string, versions)
+	for i := range list {
+		list[i] = fmt.Sprintf("1.0.%d", i)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Queries []struct {
+				Version string `json:"version"`
+			} `json:"queries"`
+		}
+
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
+		require.LessOrEqual(t, len(in.Queries), maxQueriesPerBatch)
+
+		results := make([]map[string]any, len(in.Queries))
+
+		for i, q := range in.Queries {
+			results[i] = map[string]any{"vulns": []any{}}
+
+			// The package-wide query carries no version. It must name the
+			// record or the walk never fetches it.
+			if q.Version == "" || q.Version == list[affected] {
+				results[i] = map[string]any{"vulns": []any{map[string]any{"id": "X-1"}}}
+			}
+		}
+
+		out, _ := json.Marshal(map[string]any{"results": results})
+		_, _ = w.Write(out)
+	})
+	mux.HandleFunc("/v1/vulns/X-1", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"id":"X-1","affected":[{`+
+			`"package":{"name":"p","ecosystem":"Go"},`+
+			`"versions":["`+list[affected]+`"]}]}`)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	answers, _, err := New(nil, srv.URL).Vulns(context.Background(), "go", "p", list)
+	require.NoError(t, err)
+	require.Len(t, answers, versions)
+
+	for i, v := range list {
+		want := regtypes.OutcomeClean
+		if i == affected {
+			want = regtypes.OutcomeFindings
+		}
+
+		require.Equalf(t, want, answers[v].Outcome,
+			"%s (index %d) got the answer meant for another version", v, i)
+	}
 }

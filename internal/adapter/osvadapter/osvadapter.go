@@ -242,7 +242,14 @@ func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []stri
 		// to abort the whole run - and in Process, after verdicts had already
 		// been written - which made a single 429 during rate limiting worse
 		// than an outage.
+		// Same split as the batch above. A refused record is the feed
+		// answering, and the reader needs to fix the caller rather than
+		// wait for the network to come back.
 		reason := fmt.Sprintf("the vulnerability feed could not be read: %v", err)
+		if errors.Is(err, ErrClientRequest) {
+			reason = fmt.Sprintf("the vulnerability feed refused the request, so nothing was measured: %v", err)
+		}
+
 		h.warn("%s %s: %s - nothing was checked", ecosystem, pkg, reason)
 
 		for _, v := range versions {
@@ -890,7 +897,7 @@ func (h *HTTP) getJSON(ctx context.Context, u, what string, out any) error {
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("reading vulnerability %s: status %d", what, res.StatusCode)
+		return statusError("reading vulnerability "+what+" from", u, res)
 	}
 
 	raw, err := io.ReadAll(res.Body)
@@ -916,7 +923,11 @@ var ErrClientRequest = errors.New("the feed refused the request")
 // with {"code":3,"message":"too many queries"}, which names the problem
 // exactly; substituting our own wording turned a thirty second diagnosis
 // into a bisect against the live API.
-func statusError(u string, res *http.Response) error {
+//
+// Both endpoints go through here. The batch endpoint got the refusal split
+// first and the record endpoint did not, so a refused record read as an
+// outage - the same defect, one function over.
+func statusError(what, u string, res *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 	said := strings.TrimSpace(string(body))
 
@@ -933,11 +944,11 @@ func statusError(u string, res *http.Response) error {
 	}
 
 	if res.StatusCode >= 400 && res.StatusCode < 500 {
-		return fmt.Errorf("%w: posting %s: status %d: %s",
-			ErrClientRequest, u, res.StatusCode, said)
+		return fmt.Errorf("%w: %s %s: status %d: %s",
+			ErrClientRequest, what, u, res.StatusCode, said)
 	}
 
-	return fmt.Errorf("posting %s: status %d: %s", u, res.StatusCode, said)
+	return fmt.Errorf("%s %s: status %d: %s", what, u, res.StatusCode, said)
 }
 
 func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
@@ -961,7 +972,7 @@ func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
-		return statusError(u, res)
+		return statusError("posting", u, res)
 	}
 
 	raw, err := io.ReadAll(res.Body)

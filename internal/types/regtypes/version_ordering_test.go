@@ -20,8 +20,10 @@ func TestVersionOrderingDecidesAdvisories(t *testing.T) {
 		want int
 		why  string
 	}{
-		{"v2.0.0+incompatible", "2.0.0", 0,
-			"build metadata is not part of precedence, and +incompatible is ordinary Go vocabulary"},
+		{
+			"v2.0.0+incompatible", "2.0.0", 0,
+			"build metadata is not part of precedence, and +incompatible is ordinary Go vocabulary",
+		},
 		{"2.0.0+incompatible", "2.1.0", -1, "and it must still order by the numbers"},
 		{"1.0.post1", "1.0", 1, "PEP 440: a post-release comes after its release"},
 		{"1.0.post1", "1.1", -1, "but not after the next one"},

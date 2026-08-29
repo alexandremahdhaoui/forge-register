@@ -426,8 +426,10 @@ func TestAnInternalDisclosureRaisesTheAdvisory(t *testing.T) {
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
 	h.discovery.EXPECT().Refresh(mock.Anything, "internal", "example.com/toolchain-member", mock.Anything).
 		Return([]regtypes.Candidate{
-			{Version: version, ReleasedAt: days(30),
-				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"GHSA-xxxx"}, Outcome: regtypes.OutcomeFindings},
+			{
+				Version: version, ReleasedAt: days(30),
+				Vulns: regtypes.Vector{High: 1}, VulnIDs: []string{"GHSA-xxxx"}, Outcome: regtypes.OutcomeFindings,
+			},
 		}, "sha256:snap", nil).Once()
 
 	var written regtypes.Track
@@ -688,6 +690,66 @@ func TestEvaluateCountsAMeasuredTrackAsMeasured(t *testing.T) {
 	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
 		Return([]regtypes.Candidate{{Version: "1.0.0", Outcome: regtypes.OutcomeClean}},
 			"sha256:snap", nil).Once()
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	report, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+	require.Empty(t, report.Unmeasured)
+}
+
+// TestANewTrackWithNoCurrentVersionIsStillCounted covers the gap the
+// previous test left open.
+//
+// The unmeasured loop matched a candidate against the track's current
+// version. A track admitted on this run has no current version yet, and no
+// candidate is ever the empty string, so a feed that refused every query
+// reported nothing unmeasured and the run read clean. That is the exact
+// failure the field was added to remove, surviving in the one case where a
+// package is newest to the register and least known.
+func TestANewTrackWithNoCurrentVersionIsStillCounted(t *testing.T) {
+	h := newHarness(t)
+
+	track := regtypes.Track{
+		Package: "typescript", Ecosystem: "typescript", Prefix: "5", Current: "",
+	}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "typescript", "typescript").
+		Return([]regtypes.Candidate{{
+			Version:    "5.9.3",
+			ReleasedAt: days(-60),
+			Outcome:    regtypes.OutcomeUnreachable,
+			Reason:     "the vulnerability feed refused the request: too many queries",
+		}}, "sha256:snap", nil).Once()
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	report, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+
+	require.Len(t, report.Unmeasured, 1,
+		"nothing about this package was ever checked, and the run must say so")
+	require.Contains(t, report.Unmeasured[0], "typescript:typescript")
+	require.Contains(t, report.Unmeasured[0], "too many queries")
+}
+
+// And a new track the feed did answer about stays quiet. The rule is about
+// what was measured, not about how new the track is: reporting every new
+// track would make the field noise, and noise is how the previous version of
+// this got ignored.
+func TestANewTrackTheFeedAnsweredAboutIsQuiet(t *testing.T) {
+	h := newHarness(t)
+
+	track := regtypes.Track{
+		Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "",
+	}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
+		Return([]regtypes.Candidate{{
+			Version:    "1.0.0",
+			ReleasedAt: days(60),
+			Outcome:    regtypes.OutcomeClean,
+		}}, "sha256:snap", nil).Once()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	report, err := h.c.Evaluate(context.Background(), now)
