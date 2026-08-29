@@ -409,3 +409,43 @@ func TestStatusStaysQuietWhenTheProbeFails(t *testing.T) {
 	require.NoError(t, driver.Run(context.Background(), []string{"status"}))
 	require.NotContains(t, h.out.String(), "STALE")
 }
+
+// Parsing stops at the first argument that is not a flag, so a --reason
+// after the package is never read - and the plain requirement then reads
+// like a lie, naming what you did supply. The usage text put the flags last
+// for both verbs, so this was the documented order.
+func TestAFlagAfterThePackageNamesItsOwnCause(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args    []string
+		dropped string
+	}{
+		"add": {
+			[]string{"add", "go:example.com/x", "--reason", "because"}, `"--reason"`,
+		},
+		"publish": {
+			[]string{"publish", "internal:example.com/x", "v1.0.0", "--provenance", "abc"},
+			`"--provenance"`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+
+			err := h.driver.Run(context.Background(), tc.args)
+			require.ErrorIs(t, err, clidriver.ErrUsage)
+			require.ErrorContains(t, err, "Every flag comes before the positional arguments")
+			require.ErrorContains(t, err, tc.dropped,
+				"the hint names the flag that was dropped")
+		})
+	}
+}
+
+// And a verb short of arguments for the ordinary reason says nothing about
+// flags, because there were none to blame.
+func TestAMissingPackageSaysOnlyWhatIsMissing(t *testing.T) {
+	h := newHarness(t)
+
+	err := h.driver.Run(context.Background(), []string{"add"})
+	require.ErrorIs(t, err, clidriver.ErrUsage)
+	require.ErrorContains(t, err, "add needs <ecosystem>:<package>")
+	require.NotContains(t, err.Error(), "Every flag comes before")
+}

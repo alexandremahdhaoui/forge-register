@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,11 +55,16 @@ forge-register keeps the catalog of adoptable package versions.
 
   forge-register validate  [--config forge-register.yaml]
   forge-register status    [--config ...]
-  forge-register add       [--config ...] <ecosystem>:<package> [--version v] [--track t] --reason "..."  [--requester who] [--dispatch owner/repo]
+  forge-register add       [--config ...] --reason "..." [--version v] [--track t] [--requester who] [--dispatch owner/repo] <ecosystem>:<package>
   forge-register apply     [--config ...]   answer requests, then evaluate every track
   forge-register process   [--config ...]   answer pending requests only
   forge-register evaluate  [--config ...]   evaluate every track only
-  forge-register publish   [--config ...] <ecosystem>:<package> <version> --provenance <revision> [--source url]
+  forge-register publish   [--config ...] --provenance <revision> [--source url] <ecosystem>:<package> <version>
+
+Every flag comes before the positional arguments. Parsing stops at the first
+one that is not a flag, so a --reason after the package is not read and the
+failure reads "add needs <ecosystem>:<package>" about a package you did
+supply.
 
 The CLI files requests and reads state. The index is written only by the
 pipeline verbs, which is what the register's pipeline runs.`)
@@ -276,9 +282,25 @@ type addOptions struct {
 	Dispatch string
 }
 
+// flagsFirstHint names the likely cause when a verb is short of positional
+// arguments. Parsing stops at the first argument that is not a flag, so
+// `add <package> --reason "..."` reads no package at all and the plain
+// requirement then reads like a lie: it names what you supplied. The usage
+// text put the flags last for both verbs, so this was the documented order.
+func flagsFirstHint(args []string) string {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			return ". Every flag comes before the positional arguments, and " +
+				strconv.Quote(arg) + " is after one, so nothing past it was read"
+		}
+	}
+
+	return ""
+}
+
 func (d *Driver) add(ctx context.Context, store storeadapter.Store, args []string, opts addOptions, now time.Time) error {
 	if len(args) != 1 {
-		return fmt.Errorf("%w: add needs <ecosystem>:<package>", ErrUsage)
+		return fmt.Errorf("%w: add needs <ecosystem>:<package>%s", ErrUsage, flagsFirstHint(args))
 	}
 
 	ecosystem, pkg, ok := strings.Cut(args[0], ":")
@@ -325,7 +347,8 @@ func (d *Driver) add(ctx context.Context, store storeadapter.Store, args []strin
 
 func (d *Driver) publish(ctx context.Context, controller *registercontroller.Controller, args []string, provenance, source string, now time.Time) error {
 	if len(args) != 2 {
-		return fmt.Errorf("%w: publish needs <ecosystem>:<package> <version>", ErrUsage)
+		return fmt.Errorf("%w: publish needs <ecosystem>:<package> <version>%s",
+			ErrUsage, flagsFirstHint(args))
 	}
 
 	ecosystem, pkg, ok := strings.Cut(args[0], ":")
