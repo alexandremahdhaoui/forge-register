@@ -40,6 +40,14 @@ type Report struct {
 	Verdicts []KeyedVerdict
 	Adopted  int
 	Failed   []string
+	// Unmeasured names the tracks whose outcome says nothing was checked -
+	// the feed refused, was unreachable, or carries no record. Failed
+	// counts only the tracks that aborted, and a feed failure does not
+	// abort one: the adapter records it as an outcome and the track
+	// proceeds. So a run could print "0 feed failures" while three records
+	// said the feed could not be reached, and a reader trusting the
+	// summary concluded the run was clean.
+	Unmeasured []string
 }
 
 // Evaluate walks every track: fresh discovery, the upgrade policy, advisory
@@ -64,6 +72,15 @@ func (c *Controller) Evaluate(ctx context.Context, now time.Time) (Report, error
 
 		verdict := policycontroller.EvaluateUpgrade(track, candidates, now, c.params)
 		verdict.OSVSnapshot = snapshot
+
+		for _, cand := range candidates {
+			if cand.Version == track.Current && !(regtypes.Answer{Outcome: cand.Outcome}).Measured() {
+				report.Unmeasured = append(report.Unmeasured,
+					fmt.Sprintf("%s:%s %s: %s", track.Ecosystem, track.Package, cand.Outcome, cand.Reason))
+
+				break
+			}
+		}
 
 		if verdict.Code == regtypes.VerdictAdopted {
 			if track.Ecosystem == "internal" {

@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,6 +46,20 @@ const userAgent = "forge-register (+https://github.com/alexandremahdhaoui/forge-
 // per query and hands back a token per result; a token that never clears is
 // a broken feed, and looping on it forever is worse than failing.
 const maxPages = 64
+
+// maxQueriesPerBatch is OSV's own cap on one querybatch request. Past it the
+// endpoint answers 400 {"code":3,"message":"too many queries"}.
+//
+// The register sends one query per published version, so a package crosses
+// this the moment it has published a thousand releases - and the packages
+// that get there are the oldest, most depended upon and most attacked. Three
+// tracks in one real workspace were silently unmeasured: typescript at 3809
+// versions, @types/node at 2358, typescript-eslint at 1549. Every package
+// below the line was measured; every package above it was not.
+//
+// The boundary is measured against the live API, not assumed: 1000 answers
+// 200 and 1001 answers 400.
+const maxQueriesPerBatch = 1000
 
 // Querier reads what a feed knows about a package's versions.
 type Querier interface {
@@ -186,7 +201,16 @@ func (h *HTTP) Vulns(ctx context.Context, ecosystem, pkg string, versions []stri
 		// A feed we could not reach measured nothing. Saying so is the
 		// whole point: a zero here used to be indistinguishable from a
 		// package that is genuinely clean.
+		//
+		// A refusal is not the same as an outage, and the record says
+		// which. The two need opposite responses - wait and retry, or fix
+		// the caller - and calling a 400 unreachable sent a reader to
+		// check egress and firewalls for a batch that was simply too
+		// large. Either way nothing was measured, so neither blocks.
 		reason := fmt.Sprintf("the vulnerability feed could not be reached: %v", err)
+		if errors.Is(err, ErrClientRequest) {
+			reason = fmt.Sprintf("the vulnerability feed refused the request, so nothing was measured: %v", err)
+		}
 		h.warn("%s %s: %s - nothing was checked", ecosystem, pkg, reason)
 
 		for _, v := range versions {
@@ -310,7 +334,33 @@ func (h *HTTP) reportDisagreement(ecosystem, pkg, version string, feed batchResu
 // back. Tokens arrive per result, not per response, so a second page asks
 // only about the queries that were truncated and the answers are merged back
 // into their original slots.
+// queryBatch answers one result per query, in the order asked.
+//
+// The queries are chunked to OSV's per-request cap and the answers stitched
+// back by index. The endpoint is positionally aligned, so a chunk's results
+// map onto the slice it came from with plain arithmetic.
 func (h *HTTP) queryBatch(ctx context.Context, queries []batchQuery) ([]batchResult, error) {
+	if len(queries) > maxQueriesPerBatch {
+		merged := make([]batchResult, 0, len(queries))
+
+		for start := 0; start < len(queries); start += maxQueriesPerBatch {
+			end := min(start+maxQueriesPerBatch, len(queries))
+
+			chunk, err := h.queryBatch(ctx, queries[start:end])
+			if err != nil {
+				return nil, err
+			}
+
+			merged = append(merged, chunk...)
+		}
+
+		return merged, nil
+	}
+
+	return h.queryOneBatch(ctx, queries)
+}
+
+func (h *HTTP) queryOneBatch(ctx context.Context, queries []batchQuery) ([]batchResult, error) {
 	merged := make([]batchResult, len(queries))
 
 	pending := make([]int, len(queries))
@@ -855,6 +905,41 @@ func (h *HTTP) getJSON(ctx context.Context, u, what string, out any) error {
 	return nil
 }
 
+// ErrClientRequest is a request the feed understood and refused. It is not
+// an unreachable feed: the two need opposite responses, one is wait and
+// retry and the other is fix the caller, and reporting a 400 as a network
+// problem sent a reader to check egress and firewalls for a batch that was
+// simply too large.
+var ErrClientRequest = errors.New("the feed refused the request")
+
+// statusError carries the feed's own words. OSV answers a rejected batch
+// with {"code":3,"message":"too many queries"}, which names the problem
+// exactly; substituting our own wording turned a thirty second diagnosis
+// into a bisect against the live API.
+func statusError(u string, res *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+	said := strings.TrimSpace(string(body))
+
+	var parsed struct {
+		Message string `json:"message"`
+	}
+
+	if json.Unmarshal(body, &parsed) == nil && parsed.Message != "" {
+		said = parsed.Message
+	}
+
+	if said == "" {
+		said = "no message"
+	}
+
+	if res.StatusCode >= 400 && res.StatusCode < 500 {
+		return fmt.Errorf("%w: posting %s: status %d: %s",
+			ErrClientRequest, u, res.StatusCode, said)
+	}
+
+	return fmt.Errorf("posting %s: status %d: %s", u, res.StatusCode, said)
+}
+
 func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
 	payload, err := json.Marshal(in)
 	if err != nil {
@@ -876,7 +961,7 @@ func (h *HTTP) postJSON(ctx context.Context, u string, in, out any) error {
 	defer func() { _ = res.Body.Close() }()
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("posting %s: status %d", u, res.StatusCode)
+		return statusError(u, res)
 	}
 
 	raw, err := io.ReadAll(res.Body)

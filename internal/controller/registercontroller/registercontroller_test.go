@@ -643,3 +643,54 @@ func TestAFeedOutageNeverWithdrawsAnAdvisory(t *testing.T) {
 		})
 	}
 }
+
+// A feed failure does not abort a track: the adapter records it as an
+// outcome and the track proceeds. So Failed stayed empty while records said
+// the feed could not be reached, and the run summary printed "0 feed
+// failures" - which reads as a clean run to anyone who trusts the summary
+// over the fifty-six files.
+func TestEvaluateCountsWhatTheRecordsSay(t *testing.T) {
+	h := newHarness(t)
+
+	track := regtypes.Track{
+		Package: "typescript", Ecosystem: "typescript", Prefix: "5", Current: "5.9.3",
+	}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "typescript", "typescript").
+		Return([]regtypes.Candidate{{
+			Version: "5.9.3",
+			Outcome: regtypes.OutcomeUnreachable,
+			Reason:  "the vulnerability feed refused the request: too many queries",
+		}}, "sha256:snap", nil).Once()
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	report, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+
+	// Nothing aborted, so Failed is right to be empty.
+	require.Empty(t, report.Failed)
+
+	// And the summary can no longer call that a clean run.
+	require.Len(t, report.Unmeasured, 1)
+	require.Contains(t, report.Unmeasured[0], "typescript:typescript")
+	require.Contains(t, report.Unmeasured[0], "too many queries")
+}
+
+func TestEvaluateCountsAMeasuredTrackAsMeasured(t *testing.T) {
+	h := newHarness(t)
+
+	track := regtypes.Track{
+		Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "1.0.0",
+	}
+
+	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
+	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
+		Return([]regtypes.Candidate{{Version: "1.0.0", Outcome: regtypes.OutcomeClean}},
+			"sha256:snap", nil).Once()
+	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	report, err := h.c.Evaluate(context.Background(), now)
+	require.NoError(t, err)
+	require.Empty(t, report.Unmeasured)
+}

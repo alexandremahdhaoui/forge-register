@@ -389,8 +389,16 @@ func (d *Driver) report(ctx context.Context, verb string, run func() (registerco
 		fmt.Fprintf(&b, "feed-failure %s\n", failure)
 	}
 
-	fmt.Fprintf(&b, "%s: %d verdicts, %d adopted, %d feed failures\n",
-		verb, len(report.Verdicts), report.Adopted, len(report.Failed))
+	// A track that aborted and a track the feed said nothing about are
+	// different, and the summary used to report only the first. A run could
+	// say "0 feed failures" while three records said the feed could not be
+	// reached, which reads as a clean run.
+	for _, unmeasured := range report.Unmeasured {
+		fmt.Fprintf(&b, "unmeasured %s\n", unmeasured)
+	}
+
+	fmt.Fprintf(&b, "%s: %d verdicts, %d adopted, %d aborted, %d unmeasured\n",
+		verb, len(report.Verdicts), report.Adopted, len(report.Failed), len(report.Unmeasured))
 
 	if _, err := io.WriteString(d.deps.Out, b.String()); err != nil {
 		return fmt.Errorf("writing the report: %w", err)

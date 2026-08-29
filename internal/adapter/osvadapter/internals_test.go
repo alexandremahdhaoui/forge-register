@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -332,4 +333,110 @@ func TestNoImpactIsLowWhateverTheArithmeticSays(t *testing.T) {
 	got, ok := severityOfVector("CVSS_V3", "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:N/I:N/A:N")
 	require.True(t, ok)
 	require.Equal(t, regtypes.SeverityLow, got)
+}
+
+// OSV caps a querybatch at 1000 queries and answers 400 past it. The
+// register sends one query per published version, so a package crosses the
+// cap the moment it has published a thousand releases - and the packages
+// that get there are the oldest, most depended upon and most attacked.
+//
+// Three tracks in a real workspace were silently unmeasured this way:
+// typescript at 3809 versions, @types/node at 2358, typescript-eslint at
+// 1549. Nothing blocked, because an unmeasured package warns rather than
+// blocks, so the gate stopped covering exactly the packages it most needed
+// to cover and the pipeline stayed green.
+func TestABatchLargerThanTheFeedAcceptsIsSplit(t *testing.T) {
+	const versions = 2500
+
+	var sizes []int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Queries []map[string]any `json:"queries"`
+		}
+
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&in))
+
+		// The real endpoint's answer, verbatim.
+		if len(in.Queries) > maxQueriesPerBatch {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"code":3,"message":"too many queries"}`)
+
+			return
+		}
+
+		sizes = append(sizes, len(in.Queries))
+
+		results := make([]map[string]any, len(in.Queries))
+		for i := range results {
+			results[i] = map[string]any{"vulns": []any{}}
+		}
+
+		out, _ := json.Marshal(map[string]any{"results": results})
+		_, _ = w.Write(out)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	list := make([]string, versions)
+	for i := range list {
+		list[i] = fmt.Sprintf("1.0.%d", i)
+	}
+
+	answers, _, err := New(nil, srv.URL).Vulns(context.Background(), "typescript", "p", list)
+	require.NoError(t, err)
+	require.Len(t, answers, versions)
+
+	// One query per version, plus the package-wide one.
+	require.Equal(t, []int{1000, 1000, 501}, sizes,
+		"the batch is chunked to the feed's own cap")
+
+	// And every version got an answer, in its own right.
+	for _, v := range list {
+		require.Equal(t, regtypes.OutcomeNotFound, answers[v].Outcome,
+			"%s was answered", v)
+	}
+}
+
+// A 400 is the server answering, and answering clearly. Calling it
+// unreachable sends the reader to check egress and firewalls; the two need
+// opposite responses, wait and retry versus fix the caller.
+func TestARefusalIsNotAnOutage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"code":3,"message":"too many queries"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	answers, _, err := New(nil, srv.URL).
+		Vulns(context.Background(), "go", "p", []string{"v1.0.0"})
+	require.NoError(t, err)
+
+	got := answers["v1.0.0"]
+	require.Equal(t, regtypes.OutcomeUnreachable, got.Outcome,
+		"nothing was measured either way, so it still does not block")
+	require.Contains(t, got.Reason, "refused the request",
+		"a refusal reads differently from an outage")
+	// The feed's own words, read out of the envelope rather than dumped
+	// with it. Substituting ours turned a thirty second diagnosis into a
+	// bisect against the live API.
+	require.Contains(t, got.Reason, "too many queries")
+	require.NotContains(t, got.Reason, `{"code"`,
+		"the message is extracted, not the whole JSON body")
+}
+
+func TestAnOutageStillReadsAsAnOutage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, "upstream is down")
+	}))
+	t.Cleanup(srv.Close)
+
+	answers, _, err := New(nil, srv.URL).
+		Vulns(context.Background(), "go", "p", []string{"v1.0.0"})
+	require.NoError(t, err)
+	require.Contains(t, answers["v1.0.0"].Reason, "could not be reached")
+	require.Contains(t, answers["v1.0.0"].Reason, "upstream is down")
 }
