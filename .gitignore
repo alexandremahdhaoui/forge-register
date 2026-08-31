@@ -3,9 +3,7 @@
 /tmp/
 /build/
 
-# forge-factory materialises the versions in go.mod. It is committed so the
-# module runs with a bare go run, and sync keeps it fresh.
-
-# forge-factory materialises these. A version is written in forge-factory.yaml.
-/go.mod
-/go.sum
+# go.mod and go.sum are committed - the default - so the module runs with a
+# bare go run, and sync keeps them fresh. They are deliberately NOT ignored:
+# a tracked file gitignore also names never converges, because every sync
+# dirties the tree and the revision goes -dirty forever.
