@@ -7,3 +7,6 @@
 # bare go run, and sync keeps them fresh. They are deliberately NOT ignored:
 # a tracked file gitignore also names never converges, because every sync
 # dirties the tree and the revision goes -dirty forever.
+
+# forge-factory materialises these. A version is written in forge-factory.yaml.
+/.envrc
