@@ -5,6 +5,7 @@ module github.com/alexandremahdhaoui/forge-register
 go 1.26.5
 
 require (
+	github.com/alexandremahdhaoui/forge-register-spec v0.45.56
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/stretchr/testify v1.12.1
 	sigs.k8s.io/yaml v1.6.0
