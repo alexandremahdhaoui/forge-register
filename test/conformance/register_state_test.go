@@ -121,12 +121,28 @@ func TestTheStateEngineSatisfiesTheTransportContract(t *testing.T) {
 			store := t.TempDir()
 
 			for i, o := range c.Ops {
-				in := map[string]any{"spec": map[string]any{
+				// The store is this suite's; what the vector says about the
+				// spec is the contract's. A vector that names its own kinds
+				// replaced the whole spec, path included, and the engine
+				// refused the store it was never told about (forge-self
+				// run 91, the caller-defined-kind vector).
+				spec := map[string]any{
 					"path":  store,
 					"kinds": []any{"index", "request", "verdict"},
-				}}
+				}
+
+				if vs, ok := o.In["spec"].(map[string]any); ok {
+					for k, v := range vs {
+						spec[k] = v
+					}
+				}
+
+				in := map[string]any{"spec": spec}
+
 				for k, v := range o.In {
-					in[k] = v
+					if k != "spec" {
+						in[k] = v
+					}
 				}
 
 				var got map[string]any
