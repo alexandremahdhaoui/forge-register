@@ -53,9 +53,19 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
+	// The sibling checkout wins, the same rule resolve-spec applies to a
+	// spec: in a factory whose members declare no language there is no
+	// go.work to lend forge-ci's packages to this module, and the module
+	// path form found nothing (forge-self run 90). Without a sibling, the
+	// enclosing workspace resolves the path as before.
 	build := exec.Command("go", "build", "-o", dir,
 		"github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git")
 	build.Dir = repoRoot()
+
+	if sibling := filepath.Join(repoRoot(), "..", "forge-ci"); fileExists(filepath.Join(sibling, "go.mod")) {
+		build = exec.Command("go", "build", "-C", sibling, "-o", dir, "./cmd/ci-state-git")
+	}
+
 	build.Stderr = os.Stderr
 
 	if err := build.Run(); err != nil {
@@ -79,6 +89,12 @@ func repoRoot() string {
 	}
 
 	return filepath.Dir(filepath.Dir(wd))
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && !info.IsDir()
 }
 
 func load(t *testing.T) vectors {
