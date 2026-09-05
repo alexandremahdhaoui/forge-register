@@ -27,16 +27,25 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 
-	for _, target := range []string{
-		"./cmd/forge-register",
-		"github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git",
-	} {
-		build := exec.Command("go", "build", "-o", dir, target)
+	builds := [][]string{
+		{"go", "build", "-o", dir, "./cmd/forge-register"},
+		{"go", "build", "-o", dir, "github.com/alexandremahdhaoui/forge-ci/cmd/ci-state-git"},
+	}
+
+	// The sibling checkout wins, as it does in the conformance suite: with
+	// no go.work lending forge-ci's packages to this module the module path
+	// form finds nothing (forge-self run 92).
+	if sibling := filepath.Join(repoRoot(), "..", "forge-ci"); fileExists(filepath.Join(sibling, "go.mod")) {
+		builds[1] = []string{"go", "build", "-C", sibling, "-o", dir, "./cmd/ci-state-git"}
+	}
+
+	for _, args := range builds {
+		build := exec.Command(args[0], args[1:]...)
 		build.Dir = repoRoot()
 		build.Stderr = os.Stderr
 
 		if err := build.Run(); err != nil {
-			panic("building " + target + ": " + err.Error())
+			panic("building " + args[len(args)-1] + ": " + err.Error())
 		}
 	}
 
@@ -48,6 +57,12 @@ func TestMain(m *testing.M) {
 
 	_ = os.RemoveAll(dir)
 	os.Exit(code)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && !info.IsDir()
 }
 
 func repoRoot() string {
