@@ -49,7 +49,7 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 	}
 
 	sort.Slice(newer, func(i, j int) bool {
-		return CompareVersions(newer[i].Version, newer[j].Version) > 0
+		return compareTotal(newer[i].Version, newer[j].Version) > 0
 	})
 
 	var quarantined, worse *regtypes.Candidate
@@ -171,15 +171,7 @@ func EvaluateAdmission(req regtypes.Request, available []regtypes.Candidate, now
 }
 
 func evaluateExact(verdict regtypes.Verdict, req regtypes.Request, available []regtypes.Candidate, now time.Time, p regtypes.Params) regtypes.Verdict {
-	var found *regtypes.Candidate
-
-	for i := range available {
-		if CompareVersions(available[i].Version, req.Version) == 0 {
-			found = &available[i]
-			break
-		}
-	}
-
+	found := exactMatch(available, req.Version)
 	if found == nil {
 		verdict.Code = regtypes.VerdictDeniedUnknown
 		verdict.Message = fmt.Sprintf("upstream has no %s; newest is %s",
@@ -214,6 +206,23 @@ func evaluateExact(verdict regtypes.Verdict, req regtypes.Request, available []r
 	verdict.Message = fmt.Sprintf("admitted %s (%v)", found.Version, found.Vulns)
 
 	return verdict
+}
+
+func exactMatch(available []regtypes.Candidate, version string) *regtypes.Candidate {
+	var equal *regtypes.Candidate
+
+	for i := range available {
+		c := &available[i]
+		if c.Version == version {
+			return c
+		}
+
+		if CompareVersions(c.Version, version) == 0 && (equal == nil || compareTotal(c.Version, equal.Version) > 0) {
+			equal = c
+		}
+	}
+
+	return equal
 }
 
 type TrackOpenInput struct {
@@ -288,7 +297,7 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 	}
 
 	sort.Slice(inLine, func(i, j int) bool {
-		return CompareVersions(inLine[i].Version, inLine[j].Version) > 0
+		return compareTotal(inLine[i].Version, inLine[j].Version) > 0
 	})
 
 	current := firstAdmissible(inLine, now, p)
@@ -412,7 +421,7 @@ func sortForAdmission(pool []regtypes.Candidate) {
 			return pool[i].ReleasedAt.After(pool[j].ReleasedAt)
 		}
 
-		return CompareVersions(pool[i].Version, pool[j].Version) > 0
+		return compareTotal(pool[i].Version, pool[j].Version) > 0
 	})
 }
 
@@ -439,7 +448,7 @@ func firstAdmissible(pool []regtypes.Candidate, now time.Time, p regtypes.Params
 func newest(pool []regtypes.Candidate) regtypes.Candidate {
 	best := pool[0]
 	for _, c := range pool[1:] {
-		if CompareVersions(c.Version, best.Version) > 0 {
+		if compareTotal(c.Version, best.Version) > 0 {
 			best = c
 		}
 	}
@@ -469,7 +478,7 @@ func passingAlternatives(available []regtypes.Candidate, rejected regtypes.Candi
 			continue
 		}
 
-		if pass == nil || CompareVersions(c.Version, pass.Version) > 0 {
+		if pass == nil || compareTotal(c.Version, pass.Version) > 0 {
 			pass = &available[i]
 		}
 	}

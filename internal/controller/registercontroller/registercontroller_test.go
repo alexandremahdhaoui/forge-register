@@ -181,8 +181,21 @@ func TestProcessAdmitsANewPackage(t *testing.T) {
 }
 
 func TestProcessAdmitsTheHigherVersionWhenDiscoveryReturnsTwoReleasesWithOneTimeInEitherOrder(t *testing.T) {
-	lower := regtypes.Candidate{Version: "0.27.3", ReleasedAt: days(30)}
-	higher := regtypes.Candidate{Version: "0.28.0", ReleasedAt: days(30)}
+	assertProcessAdmits(t,
+		regtypes.Candidate{Version: "0.27.3", ReleasedAt: days(30)},
+		regtypes.Candidate{Version: "0.28.0", ReleasedAt: days(30)},
+		"0", "0.28.0")
+}
+
+func TestProcessAdmitsTheHigherRawStringWhenDiscoveryReturnsTwoEqualVersionsInEitherOrder(t *testing.T) {
+	assertProcessAdmits(t,
+		regtypes.Candidate{Version: "1.2", ReleasedAt: days(30)},
+		regtypes.Candidate{Version: "1.2.0", ReleasedAt: days(30)},
+		"1", "1.2.0")
+}
+
+func assertProcessAdmits(t *testing.T, lower, higher regtypes.Candidate, prefix, want string) {
+	t.Helper()
 
 	for name, discovered := range map[string][]regtypes.Candidate{
 		"lower-first":  {lower, higher},
@@ -201,7 +214,7 @@ func TestProcessAdmitsTheHigherVersionWhenDiscoveryReturnsTwoReleasesWithOneTime
 				Return(map[string]regtypes.Request{key: request}, nil).Once()
 			h.discovery.EXPECT().Discover(mock.Anything, "rust", "example-crate").
 				Return(discovered, "sha256:snap", nil).Once()
-			h.store.EXPECT().Track(mock.Anything, "rust", "example-crate", "0").
+			h.store.EXPECT().Track(mock.Anything, "rust", "example-crate", prefix).
 				Return(regtypes.Track{}, false, nil).Once()
 
 			var written regtypes.Track
@@ -216,8 +229,8 @@ func TestProcessAdmitsTheHigherVersionWhenDiscoveryReturnsTwoReleasesWithOneTime
 
 			_, err := h.c.Process(context.Background(), now)
 			require.NoError(t, err)
-			require.Equal(t, "0.28.0", verdict.Adopted)
-			require.Equal(t, "0.28.0", written.Current)
+			require.Equal(t, want, verdict.Adopted)
+			require.Equal(t, want, written.Current)
 		})
 	}
 }

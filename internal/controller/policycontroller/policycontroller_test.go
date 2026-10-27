@@ -333,6 +333,155 @@ func TestAPendingAdmissionNamesTheHigherVersionWhenTwoReleasesShareSafetyAndTime
 	}
 }
 
+func admissionRequest(version string) regtypes.Request {
+	return regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "example.com/pkg", Ecosystem: "go",
+		Version: version, Reason: "needed",
+	}
+}
+
+func TestAnAdmissionAdoptsTheHigherRawStringWhenTwoVersionsCompareEqual(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		lower       regtypes.Candidate
+		higher      regtypes.Candidate
+		wantAdopted string
+	}{
+		{name: "missing-part", lower: candidate("1.2", 30, regtypes.Vector{}), higher: candidate("1.2.0", 30, regtypes.Vector{}), wantAdopted: "1.2.0"},
+		{name: "build-metadata", lower: candidate("2.0.0", 30, regtypes.Vector{}), higher: candidate("2.0.0+incompatible", 30, regtypes.Vector{}), wantAdopted: "2.0.0+incompatible"},
+	} {
+		for order, available := range bothOrders(tc.lower, tc.higher) {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				v := policycontroller.EvaluateAdmission(admissionRequest(""), available, now, params())
+				require.Equal(t, regtypes.VerdictAdopted, v.Code)
+				require.Equal(t, tc.wantAdopted, v.Adopted)
+			})
+		}
+	}
+}
+
+func TestAnUpgradeAdoptsTheHigherRawStringWhenTwoVersionsCompareEqual(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		lower       regtypes.Candidate
+		higher      regtypes.Candidate
+		wantAdopted string
+	}{
+		{name: "missing-part", lower: candidate("1.2", 30, regtypes.Vector{}), higher: candidate("1.2.0", 30, regtypes.Vector{}), wantAdopted: "1.2.0"},
+	} {
+		for order, candidates := range bothOrders(tc.lower, tc.higher) {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				v := policycontroller.EvaluateUpgrade(track("1", "1.1.0", regtypes.Vector{}), candidates, now, params())
+				require.Equal(t, regtypes.VerdictAdopted, v.Code)
+				require.Equal(t, tc.wantAdopted, v.Adopted)
+			})
+		}
+	}
+}
+
+func TestATrackOpensAtTheHigherRawStringWhenTwoVersionsCompareEqual(t *testing.T) {
+	req := regtypes.Request{
+		Type: regtypes.RequestOpenTrack, Package: "example.com/pkg", Ecosystem: "go",
+		Track: "1.27", Reason: "needed",
+	}
+
+	for _, tc := range []struct {
+		name        string
+		lower       regtypes.Candidate
+		higher      regtypes.Candidate
+		wantAdopted string
+	}{
+		{name: "missing-part", lower: candidate("1.27.9", 20, regtypes.Vector{}), higher: candidate("1.27.9.0", 20, regtypes.Vector{}), wantAdopted: "1.27.9.0"},
+	} {
+		for order, pair := range bothOrders(tc.lower, tc.higher) {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				versions := append([]regtypes.Candidate{
+					candidate("1.27.0", 400, regtypes.Vector{}),
+					candidate("1.28.0", 300, regtypes.Vector{}),
+				}, pair...)
+
+				v := policycontroller.EvaluateTrackOpen(policycontroller.TrackOpenInput{Request: req, Versions: versions}, now, params())
+				require.Equal(t, regtypes.VerdictAdopted, v.Code)
+				require.Equal(t, tc.wantAdopted, v.Adopted)
+			})
+		}
+	}
+}
+
+func TestAnAdmissionOverTheFloorOffersTheHigherRawStringWhenTwoVersionsCompareEqual(t *testing.T) {
+	critical := regtypes.Vector{Critical: 1}
+
+	for _, tc := range []struct {
+		name        string
+		lower       regtypes.Candidate
+		higher      regtypes.Candidate
+		wantOffered string
+	}{
+		{name: "missing-part", lower: candidate("1.2", 30, critical), higher: candidate("1.2.0", 30, critical), wantOffered: "1.2.0"},
+	} {
+		for order, available := range bothOrders(tc.lower, tc.higher) {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				v := policycontroller.EvaluateAdmission(admissionRequest(""), available, now, params())
+				require.Equal(t, regtypes.VerdictDeniedOverFloor, v.Code)
+				require.Len(t, v.Alternatives, 1)
+				require.Equal(t, tc.wantOffered, v.Alternatives[0].Version)
+			})
+		}
+	}
+}
+
+func TestARejectedExactRequestOffersTheHigherRawStringWhenTwoPassingVersionsCompareEqual(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		lower       regtypes.Candidate
+		higher      regtypes.Candidate
+		wantOffered string
+	}{
+		{name: "missing-part", lower: candidate("1.2", 90, regtypes.Vector{}), higher: candidate("1.2.0", 90, regtypes.Vector{}), wantOffered: "1.2.0"},
+	} {
+		for order, pair := range bothOrders(tc.lower, tc.higher) {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				available := append([]regtypes.Candidate{candidate("2.0.0", 30, regtypes.Vector{Critical: 1})}, pair...)
+
+				v := policycontroller.EvaluateAdmission(admissionRequest("2.0.0"), available, now, params())
+				require.Equal(t, regtypes.VerdictDeniedOverFloor, v.Code)
+				require.Len(t, v.Alternatives, 1)
+				require.Equal(t, tc.wantOffered, v.Alternatives[0].Version)
+			})
+		}
+	}
+}
+
+func TestAnExactRequestMatchesItsOwnRawStringBeforeAnEqualVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		requested   string
+		lower       regtypes.Candidate
+		higher      regtypes.Candidate
+		wantCode    string
+		wantAdopted string
+	}{
+		{
+			name: "the-raw-match-wins", requested: "1.2",
+			lower: candidate("1.2", 90, regtypes.Vector{}), higher: candidate("1.2.0", 90, regtypes.Vector{Critical: 1}),
+			wantCode: regtypes.VerdictAdopted, wantAdopted: "1.2",
+		},
+		{
+			name: "without-a-raw-match-the-higher-raw-string-wins", requested: "v1.2",
+			lower: candidate("1.2", 90, regtypes.Vector{Critical: 1}), higher: candidate("1.2.0", 90, regtypes.Vector{}),
+			wantCode: regtypes.VerdictAdopted, wantAdopted: "1.2.0",
+		},
+	} {
+		for order, available := range bothOrders(tc.lower, tc.higher) {
+			t.Run(tc.name+"/"+order, func(t *testing.T) {
+				v := policycontroller.EvaluateAdmission(admissionRequest(tc.requested), available, now, params())
+				require.Equal(t, tc.wantCode, v.Code)
+				require.Equal(t, tc.wantAdopted, v.Adopted)
+			})
+		}
+	}
+}
+
 func TestEvaluateTrackOpen(t *testing.T) {
 	clean := regtypes.Vector{}
 
