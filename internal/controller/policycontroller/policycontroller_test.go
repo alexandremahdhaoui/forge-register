@@ -100,7 +100,7 @@ func TestEvaluateUpgrade(t *testing.T) {
 			name:  "security-upgrade-waives-quarantine",
 			track: track("1", "1.2.0", oneHigh),
 			candidates: []regtypes.Candidate{
-				candidate("1.2.1", 0, oneLow), // released today, fixes the high, adds a low
+				candidate("1.2.1", 0, oneLow),
 			},
 			wantCode:    regtypes.VerdictAdopted,
 			wantAdopted: "1.2.1",
@@ -109,7 +109,7 @@ func TestEvaluateUpgrade(t *testing.T) {
 			name:  "equal-vector-waits-quarantine",
 			track: track("1", "1.2.0", clean),
 			candidates: []regtypes.Candidate{
-				candidate("1.2.1", 2, clean), // inside the 7-day quarantine
+				candidate("1.2.1", 2, clean),
 			},
 			wantCode: regtypes.VerdictHeldQuarantined,
 		},
@@ -297,6 +297,42 @@ func TestEvaluateAdmission(t *testing.T) {
 	}
 }
 
+func bothOrders(a, b regtypes.Candidate) map[string][]regtypes.Candidate {
+	return map[string][]regtypes.Candidate{
+		"lower-first":  {a, b},
+		"higher-first": {b, a},
+	}
+}
+
+func TestAnAdmissionAdoptsTheHigherVersionWhenTwoReleasesShareSafetyAndTime(t *testing.T) {
+	req := regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "example.com/pkg", Ecosystem: "go", Reason: "needed",
+	}
+
+	for name, available := range bothOrders(candidate("0.27.3", 30, regtypes.Vector{}), candidate("0.28.0", 30, regtypes.Vector{})) {
+		t.Run(name, func(t *testing.T) {
+			v := policycontroller.EvaluateAdmission(req, available, now, params())
+			require.Equal(t, regtypes.VerdictAdopted, v.Code)
+			require.Equal(t, "0.28.0", v.Adopted)
+		})
+	}
+}
+
+func TestAPendingAdmissionNamesTheHigherVersionWhenTwoReleasesShareSafetyAndTime(t *testing.T) {
+	req := regtypes.Request{
+		Type: regtypes.RequestAdmission, Package: "example.com/pkg", Ecosystem: "go", Reason: "needed",
+	}
+
+	for name, available := range bothOrders(candidate("0.27.3", 1, regtypes.Vector{}), candidate("0.28.0", 1, regtypes.Vector{})) {
+		t.Run(name, func(t *testing.T) {
+			v := policycontroller.EvaluateAdmission(req, available, now, params())
+			require.Equal(t, regtypes.VerdictPendingAdmission, v.Code)
+			require.Len(t, v.Alternatives, 1)
+			require.Equal(t, "0.28.0", v.Alternatives[0].Version)
+		})
+	}
+}
+
 func TestEvaluateTrackOpen(t *testing.T) {
 	clean := regtypes.Vector{}
 
@@ -307,8 +343,8 @@ func TestEvaluateTrackOpen(t *testing.T) {
 
 	maintained := []regtypes.Candidate{
 		candidate("1.27.0", 400, clean),
-		candidate("1.28.0", 300, clean), // successor line opened...
-		candidate("1.27.9", 20, clean),  // ...and 1.27 still receives releases after it
+		candidate("1.28.0", 300, clean),
+		candidate("1.27.9", 20, clean),
 	}
 
 	defaultCurrent := candidate("1.28.0", 300, clean)
@@ -331,7 +367,7 @@ func TestEvaluateTrackOpen(t *testing.T) {
 				Request: req,
 				Versions: []regtypes.Candidate{
 					candidate("1.27.0", 400, clean),
-					candidate("1.28.0", 300, clean), // nothing in 1.27 since 1.28 exists
+					candidate("1.28.0", 300, clean),
 				},
 				DefaultCurrent: &defaultCurrent,
 			},
@@ -461,8 +497,6 @@ func TestEvaluateDeprecation(t *testing.T) {
 }
 
 func TestAFreshDisclosureOnCurrentOverridesTheHistory(t *testing.T) {
-	// The history recorded a clean adoption; the fresh snapshot says current
-	// now carries a critical, and a clean release exists: security upgrade.
 	tr := track("1", "1.1.0", regtypes.Vector{})
 
 	v := policycontroller.EvaluateUpgrade(tr, []regtypes.Candidate{
@@ -475,11 +509,6 @@ func TestAFreshDisclosureOnCurrentOverridesTheHistory(t *testing.T) {
 	require.Contains(t, v.Message, "security upgrade")
 }
 
-// TestEvaluateQuietNamesSilenceWithNoSuccessor: a track whose upstream
-// went quiet with nowhere to go is marked, stays current, and the mark
-// carries the last release date so re-evaluation is idempotent. Anything
-// else - a successor (deprecation's job), recent releases, no dates, an
-// already deprecated track - answers nil, which clears the mark.
 func TestEvaluateQuietNamesSilenceWithNoSuccessor(t *testing.T) {
 	t.Parallel()
 

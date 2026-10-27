@@ -71,9 +71,6 @@ func TestEvaluateAdvancesATrackAndWritesTheVerdict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, report.Adopted)
 
-	// The decision is returned and printed, and the index commit beside it
-	// is what records it. Storing one file per track per run produced 496
-	// records in golden-register, thirteen of them identical for one track.
 	require.Len(t, report.Verdicts, 1)
 	verdict = report.Verdicts[0].Verdict
 
@@ -107,8 +104,6 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 
 	track := regtypes.Track{Package: "example.com/pkg", Ecosystem: "go", Prefix: "1", Current: "1.1.0"}
 
-	// Current gains a vulnerability and no fixed release exists: the track
-	// keeps its current, and an advisory appears.
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
 	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
 		Return([]regtypes.Candidate{
@@ -130,7 +125,6 @@ func TestEvaluateRaisesAndClearsAnAdvisory(t *testing.T) {
 	require.Equal(t, []string{"CVE-9"}, written.Advisory.VulnIDs)
 	require.Equal(t, regtypes.SeverityHigh, written.Advisory.Severity)
 
-	// The fix appears: the track adopts it and the advisory clears.
 	h.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{written}, nil).Once()
 	h.discovery.EXPECT().Discover(mock.Anything, "go", "example.com/pkg").
 		Return([]regtypes.Candidate{
@@ -184,6 +178,48 @@ func TestProcessAdmitsANewPackage(t *testing.T) {
 	require.Equal(t, regtypes.VerdictAdopted, verdict.Code)
 	require.Equal(t, "1.0.0", written.Current)
 	require.Equal(t, "1", written.Prefix)
+}
+
+func TestProcessAdmitsTheHigherVersionWhenDiscoveryReturnsTwoReleasesWithOneTimeInEitherOrder(t *testing.T) {
+	lower := regtypes.Candidate{Version: "0.27.3", ReleasedAt: days(30)}
+	higher := regtypes.Candidate{Version: "0.28.0", ReleasedAt: days(30)}
+
+	for name, discovered := range map[string][]regtypes.Candidate{
+		"lower-first":  {lower, higher},
+		"higher-first": {higher, lower},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+
+			request := regtypes.Request{
+				Type: regtypes.RequestAdmission, Package: "example-crate", Ecosystem: "rust",
+				Reason: "needed", CreatedAt: now,
+			}
+			key := registercontroller.RequestKey(request, now)
+
+			h.store.EXPECT().PendingRequests(mock.Anything).
+				Return(map[string]regtypes.Request{key: request}, nil).Once()
+			h.discovery.EXPECT().Discover(mock.Anything, "rust", "example-crate").
+				Return(discovered, "sha256:snap", nil).Once()
+			h.store.EXPECT().Track(mock.Anything, "rust", "example-crate", "0").
+				Return(regtypes.Track{}, false, nil).Once()
+
+			var written regtypes.Track
+
+			h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).
+				Run(func(_ context.Context, tr regtypes.Track) { written = tr }).Return(nil).Once()
+
+			var verdict regtypes.Verdict
+
+			h.store.EXPECT().PutVerdict(mock.Anything, key, mock.Anything).
+				Run(func(_ context.Context, _ string, v regtypes.Verdict) { verdict = v }).Return(nil).Once()
+
+			_, err := h.c.Process(context.Background(), now)
+			require.NoError(t, err)
+			require.Equal(t, "0.28.0", verdict.Adopted)
+			require.Equal(t, "0.28.0", written.Current)
+		})
+	}
 }
 
 func TestProcessRejectsWithoutTouchingTheIndex(t *testing.T) {
@@ -337,7 +373,6 @@ func TestAnAdmissionBehindTheTrackMovesNothing(t *testing.T) {
 		}, true, nil).Once()
 	h.store.EXPECT().PutVerdict(mock.Anything, key, mock.Anything).Return(nil).Once()
 
-	// No PutTrack expectation: the track is already ahead of the adoption.
 	_, err := h.c.Process(context.Background(), now)
 	require.NoError(t, err)
 }
@@ -355,8 +390,6 @@ func TestAFeedFailureHidesNoOtherTrack(t *testing.T) {
 		Return(nil, "", errors.New("status 404")).Once()
 	h.discovery.EXPECT().Discover(mock.Anything, "rust", "p").
 		Return([]regtypes.Candidate{{Version: "1.0.0", ReleasedAt: days(90)}}, "s", nil).Once()
-	// Internal versions still enter only by proof, but their vectors are
-	// refreshed over the published history like every other track's.
 	h.discovery.EXPECT().Refresh(mock.Anything, "internal", "spec", mock.Anything).
 		Return([]regtypes.Candidate{}, "s2", nil).Once()
 	h.store.EXPECT().PutTrack(mock.Anything, mock.Anything).Return(nil).Twice()
@@ -368,17 +401,6 @@ func TestAFeedFailureHidesNoOtherTrack(t *testing.T) {
 	require.Len(t, report.Verdicts, 2, "the broken feed hides nothing")
 }
 
-// A published fix advances an internal track the moment its vector
-// improves: the fast-adopt the policy always had, now reachable for
-// versions that entered by proof. Only the pointer moves - a second
-// history entry would shadow the provenance the published one carries.
-// An internal track weighs exactly one candidate: the version it is on.
-//
-// This replaces a test that handed the policy a track sitting on an old
-// version with a newer, fixed one behind it in history. Publish cannot write
-// that state - it moves current forward whenever it accepts a version - and
-// the history array was the only thing that made the shape constructible. The
-// test passed and the path it covered was unreachable.
 func TestAnInternalTrackWeighsOnlyTheVersionItIsOn(t *testing.T) {
 	h := newHarness(t)
 
@@ -446,9 +468,6 @@ func TestAnInternalDisclosureRaisesTheAdvisory(t *testing.T) {
 func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 	h := newHarness(t)
 
-	// Upstream's only life above 0.x is pre-releases and the 0.x line has
-	// not released in over staleAfterDays: nothing exists to move to, so
-	// the track must not deprecate as stale.
 	track := regtypes.Track{
 		Package: "httpx", Ecosystem: "python", Prefix: "0", Current: "0.28.1",
 	}
@@ -469,7 +488,6 @@ func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, written.Deprecated)
 
-	// The moment 1.0 is a release, the stale rule may bite.
 	h2 := newHarness(t)
 	h2.store.EXPECT().Tracks(mock.Anything).Return([]regtypes.Track{track}, nil).Once()
 	h2.discovery.EXPECT().Discover(mock.Anything, "python", "httpx").
@@ -487,14 +505,6 @@ func TestAPrereleaseLineIsNotASuccessor(t *testing.T) {
 	require.Equal(t, regtypes.DeprecationStale, written.Deprecated.Reason)
 }
 
-// An advisory has to carry what a consumer needs to decide, and nothing it
-// did not check.
-//
-// forge-factory printed "no fix upstream" from a string constant on every
-// advisory it ever raised. Measured over 267 real OSV records a fixed version
-// exists in 99 percent of them, so that sentence was wrong almost every time.
-// The advisory now carries the fix, the import scope, and the date the feed
-// published rather than the date this pipeline happened to run.
 func TestAnAdvisoryCarriesTheFixTheScopeAndTheRealDate(t *testing.T) {
 	h := newHarness(t)
 
@@ -532,10 +542,6 @@ func TestAnAdvisoryCarriesTheFixTheScopeAndTheRealDate(t *testing.T) {
 	require.NotEqual(t, now, written.Advisory.Since)
 }
 
-// A finding the feed never classified says so. The severity vector counts an
-// unpublished severity as high, which is right when comparing two versions
-// and wrong in a sentence a person reads: "high" would be a claim the feed
-// never made. 38 percent of real records publish no severity anywhere.
 func TestAnUnclassifiedFindingSaysUnknownRatherThanHigh(t *testing.T) {
 	h := newHarness(t)
 
@@ -566,8 +572,6 @@ func TestAnUnclassifiedFindingSaysUnknownRatherThanHigh(t *testing.T) {
 		"GO-2026-5932 has no fix and never will: the package is unmaintained by design")
 }
 
-// Nothing measured, nothing asserted. An advisory raised on an absence of
-// knowledge is a guess with a severity attached to it.
 func TestAnUnmeasuredVersionRaisesNoAdvisory(t *testing.T) {
 	for _, outcome := range []regtypes.Outcome{regtypes.OutcomeNotFound, regtypes.OutcomeUnreachable} {
 		t.Run(string(outcome), func(t *testing.T) {
@@ -598,14 +602,6 @@ func TestAnUnmeasuredVersionRaisesNoAdvisory(t *testing.T) {
 	}
 }
 
-// A feed outage must never withdraw a finding.
-//
-// Refusing to raise an advisory on an absence of knowledge is right.
-// Clearing one on the same absence is the same mistake pointed the other way,
-// and far worse: an advisory pierces every pin, so withdrawing it unblocks
-// every consumer of a version still known to be vulnerable - and the write is
-// committed, so the next run cannot tell the finding ever existed. An OSV
-// outage is the ordinary way an unmeasured outcome happens.
 func TestAFeedOutageNeverWithdrawsAnAdvisory(t *testing.T) {
 	for _, outcome := range []regtypes.Outcome{regtypes.OutcomeUnreachable, regtypes.OutcomeNotFound} {
 		t.Run(string(outcome), func(t *testing.T) {
@@ -646,11 +642,6 @@ func TestAFeedOutageNeverWithdrawsAnAdvisory(t *testing.T) {
 	}
 }
 
-// A feed failure does not abort a track: the adapter records it as an
-// outcome and the track proceeds. So Failed stayed empty while records said
-// the feed could not be reached, and the run summary printed "0 feed
-// failures" - which reads as a clean run to anyone who trusts the summary
-// over the fifty-six files.
 func TestEvaluateCountsWhatTheRecordsSay(t *testing.T) {
 	h := newHarness(t)
 
@@ -670,10 +661,8 @@ func TestEvaluateCountsWhatTheRecordsSay(t *testing.T) {
 	report, err := h.c.Evaluate(context.Background(), now)
 	require.NoError(t, err)
 
-	// Nothing aborted, so Failed is right to be empty.
 	require.Empty(t, report.Failed)
 
-	// And the summary can no longer call that a clean run.
 	require.Len(t, report.Unmeasured, 1)
 	require.Contains(t, report.Unmeasured[0], "typescript:typescript")
 	require.Contains(t, report.Unmeasured[0], "too many queries")
@@ -697,15 +686,6 @@ func TestEvaluateCountsAMeasuredTrackAsMeasured(t *testing.T) {
 	require.Empty(t, report.Unmeasured)
 }
 
-// TestANewTrackWithNoCurrentVersionIsStillCounted covers the gap the
-// previous test left open.
-//
-// The unmeasured loop matched a candidate against the track's current
-// version. A track admitted on this run has no current version yet, and no
-// candidate is ever the empty string, so a feed that refused every query
-// reported nothing unmeasured and the run read clean. That is the exact
-// failure the field was added to remove, surviving in the one case where a
-// package is newest to the register and least known.
 func TestANewTrackWithNoCurrentVersionIsStillCounted(t *testing.T) {
 	h := newHarness(t)
 
@@ -732,10 +712,6 @@ func TestANewTrackWithNoCurrentVersionIsStillCounted(t *testing.T) {
 	require.Contains(t, report.Unmeasured[0], "too many queries")
 }
 
-// And a new track the feed did answer about stays quiet. The rule is about
-// what was measured, not about how new the track is: reporting every new
-// track would make the field noise, and noise is how the previous version of
-// this got ignored.
 func TestANewTrackTheFeedAnsweredAboutIsQuiet(t *testing.T) {
 	h := newHarness(t)
 

@@ -1,7 +1,3 @@
-// Package policycontroller is the whole algorithm and nothing else: no I/O,
-// no clock of its own, every input handed in and every decision returned as a
-// verdict. If a rule cannot be written as a table test, it does not belong
-// here.
 package policycontroller
 
 import (
@@ -14,10 +10,6 @@ import (
 
 const day = 24 * time.Hour
 
-// EvaluateUpgrade decides whether a track advances, per the design: a
-// strictly safer candidate adopts immediately, an equally safe one adopts
-// after quarantine, a worse one is held. The newest adoptable candidate wins.
-// Not upgrading is never silent.
 func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now time.Time, p regtypes.Params) regtypes.Verdict {
 	verdict := regtypes.Verdict{
 		Package:   track.Package,
@@ -26,9 +18,6 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 		DecidedAt: now,
 	}
 
-	// The history records what current's vulnerabilities were at adoption;
-	// the fresh snapshot says what they are now. A disclosure on the current
-	// version must move this comparison, so fresh wins when present.
 	current := currentVector(track)
 
 	for _, c := range candidates {
@@ -39,9 +28,6 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 		}
 	}
 
-	// Internal versions enter by proof, and their dev labels ARE their
-	// version format - filtering prereleases would filter the whole track.
-	// Everywhere else a prerelease never upgrades a track on its own.
 	admitPrereleases := track.Ecosystem == "internal"
 
 	newer := make([]regtypes.Candidate, 0, len(candidates))
@@ -118,10 +104,6 @@ func EvaluateUpgrade(track regtypes.Track, candidates []regtypes.Candidate, now 
 	return verdict
 }
 
-// EvaluateAdmission decides what version an admission or upgrade request
-// gets. It never substitutes a version the requester did not ask for: a
-// violation is a structured rejection listing the alternatives, and choosing
-// to live with one is the requester's next, explicit request.
 func EvaluateAdmission(req regtypes.Request, available []regtypes.Candidate, now time.Time, p regtypes.Params) regtypes.Verdict {
 	verdict := regtypes.Verdict{
 		Package:   req.Package,
@@ -188,8 +170,6 @@ func EvaluateAdmission(req regtypes.Request, available []regtypes.Candidate, now
 	return verdict
 }
 
-// evaluateExact handles a request naming an exact version. Nothing is ever
-// swapped under the requester.
 func evaluateExact(verdict regtypes.Verdict, req regtypes.Request, available []regtypes.Candidate, now time.Time, p regtypes.Params) regtypes.Verdict {
 	var found *regtypes.Candidate
 
@@ -236,21 +216,13 @@ func evaluateExact(verdict regtypes.Verdict, req regtypes.Request, available []r
 	return verdict
 }
 
-// TrackOpenInput carries everything the track deny policies need.
 type TrackOpenInput struct {
-	Request regtypes.Request
-	// Versions is every upstream release of the package.
-	Versions []regtypes.Candidate
-	// DefaultCurrent is the default track's current version, when one exists.
+	Request        regtypes.Request
+	Versions       []regtypes.Candidate
 	DefaultCurrent *regtypes.Candidate
-	// NonMajorTracks counts the package's already-open finer tracks.
 	NonMajorTracks int
 }
 
-// EvaluateTrackOpen runs the deterministic deny policies: a track is a fact
-// about upstream, not a preference of a consumer, so it opens only for a
-// provably maintained line, never as a security regression, and never past
-// the budget.
 func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regtypes.Verdict {
 	verdict := regtypes.Verdict{
 		Package:   in.Request.Package,
@@ -315,9 +287,6 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 		return verdict
 	}
 
-	// A maintenance track opens at the line's head - the backports are the
-	// point - so candidates order newest first here, with the floor and
-	// quarantine still enforced.
 	sort.Slice(inLine, func(i, j int) bool {
 		return CompareVersions(inLine[i].Version, inLine[j].Version) > 0
 	})
@@ -348,18 +317,12 @@ func EvaluateTrackOpen(in TrackOpenInput, now time.Time, p regtypes.Params) regt
 	return verdict
 }
 
-// DeprecationInput carries what deprecation policy reads.
 type DeprecationInput struct {
-	Track regtypes.Track
-	// HasSuccessor reports whether a newer line of this package exists.
-	HasSuccessor bool
-	// LastReleaseInPrefix is upstream's newest release inside this track.
+	Track               regtypes.Track
+	HasSuccessor        bool
 	LastReleaseInPrefix time.Time
 }
 
-// EvaluateDeprecation is programmatic, never manual: a track deprecates when
-// its advisory has no fix past the window, or when upstream stopped releasing
-// into it while a successor exists. An already-deprecated track is stable.
 func EvaluateDeprecation(in DeprecationInput, now time.Time, p regtypes.Params) *regtypes.Deprecation {
 	if in.Track.Deprecated != nil {
 		return in.Track.Deprecated
@@ -378,12 +341,6 @@ func EvaluateDeprecation(in DeprecationInput, now time.Time, p regtypes.Params) 
 	return nil
 }
 
-// EvaluateQuiet names a track whose upstream went silent with nowhere to
-// go: past the stale window with no successor line, the track stays
-// current and carries the last release date, visibly. Deprecation needs a
-// successor to point at; silence without one is a fact worth naming, not
-// a retirement. The answer is the mark to store - nil clears it, so the
-// mark heals itself when upstream releases again or a successor appears.
 func EvaluateQuiet(in DeprecationInput, now time.Time, p regtypes.Params) *time.Time {
 	if in.Track.Deprecated != nil || in.HasSuccessor || in.LastReleaseInPrefix.IsZero() {
 		return nil
@@ -398,10 +355,6 @@ func EvaluateQuiet(in DeprecationInput, now time.Time, p regtypes.Params) *time.
 	return &since
 }
 
-// currentVector is what the register last measured for the version the track
-// is on. It sits on the track itself now: it described the current version
-// all along, and reaching for the last row of a history array to find it was
-// the only thing that array was load-bearing for.
 func currentVector(track regtypes.Track) regtypes.Vector {
 	return track.Vulns
 }
@@ -414,9 +367,6 @@ func age(c regtypes.Candidate, now time.Time) time.Duration {
 	return now.Sub(c.ReleasedAt)
 }
 
-// poolFor narrows candidates to releases in the requested track, or in the
-// highest released major when the request names none: the default track.
-// Pre-releases never enter a pool; a request must name one exactly.
 func poolFor(req regtypes.Request, available []regtypes.Candidate) []regtypes.Candidate {
 	releases := make([]regtypes.Candidate, 0, len(available))
 	for _, c := range available {
@@ -452,15 +402,17 @@ func trackFor(req regtypes.Request, c regtypes.Candidate) string {
 	return MajorOf(c.Version)
 }
 
-// sortForAdmission orders by severity vector ascending, then release date
-// descending: the safest first, the freshest among equals.
 func sortForAdmission(pool []regtypes.Candidate) {
 	sort.SliceStable(pool, func(i, j int) bool {
 		if c := pool[i].Vulns.Compare(pool[j].Vulns); c != 0 {
 			return c < 0
 		}
 
-		return pool[i].ReleasedAt.After(pool[j].ReleasedAt)
+		if !pool[i].ReleasedAt.Equal(pool[j].ReleasedAt) {
+			return pool[i].ReleasedAt.After(pool[j].ReleasedAt)
+		}
+
+		return CompareVersions(pool[i].Version, pool[j].Version) > 0
 	})
 }
 
@@ -506,10 +458,6 @@ func alternativesOf(cs ...regtypes.Candidate) []regtypes.Alternative {
 	return out
 }
 
-// passingAlternatives offers what a rejected exact request could ask for
-// instead: the newest version passing the floor and out of quarantine, and
-// the newest overall when they differ. An alternative the policy would also
-// reject is no alternative.
 func passingAlternatives(available []regtypes.Candidate, rejected regtypes.Candidate, now time.Time, p regtypes.Params) []regtypes.Alternative {
 	var out []regtypes.Alternative
 
